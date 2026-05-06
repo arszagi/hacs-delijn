@@ -34,8 +34,8 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._api_key: str = ""
         self._scan_interval: int = DEFAULT_SCAN_INTERVAL
-        self._selected_stops: dict[str, str] = {}   # stop_id → stop_name
-        self._search_results: dict[str, str] = {}   # stop_id → stop_name
+        self._selected_groups: dict[str, list[str]] = {}   # display_name → [stop_ids]
+        self._search_results: dict[str, dict] = {}          # display_name → group dict
         self._gtfs_manager: GtfsStaticManager | None = None
 
     # ------------------------------------------------------------------
@@ -101,10 +101,9 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not results:
                     errors["stop_search"] = "no_stops_found"
                 else:
-                    self._search_results = {r["stop_id"]: r["name"] for r in results}
+                    self._search_results = {r["display_name"]: r for r in results}
                     if len(results) == 1:
-                        # Only one result — select it directly
-                        return await self._add_stop_and_confirm(results[0]["stop_id"], results[0]["name"])
+                        return await self._add_group_and_confirm(results[0])
                     return await self.async_step_select_stop()
 
         return self.async_show_form(
@@ -119,11 +118,10 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
-            stop_id = user_input["stop_id"]
-            stop_name = self._search_results.get(stop_id, stop_id)
-            return await self._add_stop_and_confirm(stop_id, stop_name)
+            group = self._search_results[user_input["stop_id"]]
+            return await self._add_group_and_confirm(group)
 
-        options = {sid: name for sid, name in self._search_results.items()}
+        options = {display_name: display_name for display_name in self._search_results}
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({
@@ -135,8 +133,8 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
     # Step 4 — Confirm stops + add more or finish
     # ------------------------------------------------------------------
 
-    async def _add_stop_and_confirm(self, stop_id: str, stop_name: str):
-        self._selected_stops[stop_id] = stop_name
+    async def _add_group_and_confirm(self, group: dict):
+        self._selected_groups[group["display_name"]] = group["stop_ids"]
         return await self.async_step_confirm_stops()
 
     async def async_step_confirm_stops(self, user_input: dict | None = None):
@@ -146,7 +144,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_add_stop()
             return self._create_entry()
 
-        stops_summary = "\n".join(f"• {name}" for name in self._selected_stops.values())
+        stops_summary = "\n".join(f"• {name}" for name in self._selected_groups)
         return self.async_show_form(
             step_id="confirm_stops",
             data_schema=vol.Schema({
@@ -159,12 +157,18 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _create_entry(self):
+        # Flatten all group stop_ids into a single deduplicated list
+        all_stop_ids = list({
+            sid
+            for ids in self._selected_groups.values()
+            for sid in ids
+        })
         return self.async_create_entry(
             title="De Lijn",
             data={
                 CONF_API_KEY: self._api_key,
                 CONF_SCAN_INTERVAL: self._scan_interval,
-                CONF_STOP_IDS: list(self._selected_stops.keys()),
+                CONF_STOP_IDS: all_stop_ids,
             },
         )
 
@@ -183,7 +187,7 @@ class DeLijnOptionsFlow(OptionsFlow):
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._search_results: dict[str, str] = {}
+        self._search_results: dict[str, dict] = {}   # display_name → group dict
         self._gtfs_manager: GtfsStaticManager | None = None
 
     async def async_step_init(self, user_input: dict | None = None):
@@ -215,9 +219,9 @@ class DeLijnOptionsFlow(OptionsFlow):
                 if not results:
                     errors["stop_search"] = "no_stops_found"
                 else:
-                    self._search_results = {r["stop_id"]: r["name"] for r in results}
+                    self._search_results = {r["display_name"]: r for r in results}
                     if len(results) == 1:
-                        return await self._save_new_stop(results[0]["stop_id"])
+                        return await self._save_new_group(results[0])
                     return await self.async_step_select_stop()
 
         return self.async_show_form(
@@ -228,19 +232,22 @@ class DeLijnOptionsFlow(OptionsFlow):
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
-            return await self._save_new_stop(user_input["stop_id"])
+            group = self._search_results[user_input["stop_id"]]
+            return await self._save_new_group(group)
 
+        options = {name: name for name in self._search_results}
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({
-                vol.Required("stop_id"): vol.In(self._search_results)
+                vol.Required("stop_id"): vol.In(options)
             }),
         )
 
-    async def _save_new_stop(self, stop_id: str):
+    async def _save_new_group(self, group: dict):
         current_stops = list(self._config_entry.data.get(CONF_STOP_IDS, []))
-        if stop_id not in current_stops:
-            current_stops.append(stop_id)
+        for stop_id in group["stop_ids"]:
+            if stop_id not in current_stops:
+                current_stops.append(stop_id)
         return self._save_data({CONF_STOP_IDS: current_stops})
 
     # ------------------------------------------------------------------

@@ -140,8 +140,9 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        # Group all platforms with the same stop name under one device
         return DeviceInfo(
-            identifiers={(DOMAIN, self._stop_id)},
+            identifiers={(DOMAIN, _slugify(self._stop_name))},
             name=self._stop_name,
             manufacturer="De Lijn",
             model="Bus Stop",
@@ -232,8 +233,9 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        # Same device as the departure sensors — grouped by stop name
         return DeviceInfo(
-            identifiers={(DOMAIN, self._stop_id)},
+            identifiers={(DOMAIN, _slugify(self._stop_name))},
             name=self._stop_name,
             manufacturer="De Lijn",
             model="Bus Stop",

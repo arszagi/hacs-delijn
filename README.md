@@ -2,7 +2,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
+[![Version](https://img.shields.io/badge/version-0.0.2-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
 
 A Home Assistant custom integration for **De Lijn** — the public transport operator for buses and trams in Flanders, Belgium.
 
@@ -61,8 +61,19 @@ Provides real-time departure times, delays and service alerts for any De Lijn st
 2. Search for **De Lijn**
 3. Enter your API key
 4. Set the refresh interval (default: 30 seconds)
-5. Search for a stop by name and select it
+5. Search for a stop (see below) and select it
 6. Add as many stops as needed, then finish
+
+### Searching for a stop
+
+You can search either by **name** or by **stop number** — the behaviour differs:
+
+| Search type | Example | Result |
+|---|---|---|
+| **By name** | `Clovis` | All platforms sharing that name are grouped into one entry — e.g. *Sint-Josse Clovis (2 platforms)*. Selecting it monitors all platforms at once. |
+| **By number** | `304660` | Only the specific platform with that number is returned. Useful when you want to monitor a single direction. |
+
+> Stop numbers are printed on the physical stop signs and on the De Lijn website.
 
 ### Options (post-installation)
 

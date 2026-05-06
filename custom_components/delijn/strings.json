@@ -11,9 +11,9 @@
       },
       "add_stop": {
         "title": "Search for a stop",
-        "description": "Enter the name of the stop you want to monitor.",
+        "description": "Search by **name** to get all platforms at that stop grouped together, or by **stop number** (printed on the stop sign) to monitor a single specific platform.",
         "data": {
-          "stop_search": "Stop name"
+          "stop_search": "Stop name or number"
         }
       },
       "select_stop": {
@@ -59,7 +59,7 @@
       "add_stop": {
         "title": "Add a stop",
         "data": {
-          "stop_search": "Stop name"
+          "stop_search": "Stop name or number"
         }
       },
       "select_stop": {

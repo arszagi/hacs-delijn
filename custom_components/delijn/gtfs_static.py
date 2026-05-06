@@ -81,13 +81,34 @@ class GtfsStaticManager:
         await self._download_and_parse()
 
     def search_stops(self, query: str) -> list[dict]:
-        """Return stops whose name contains the query string (case-insensitive)."""
-        query_lower = query.lower()
-        return [
-            {"stop_id": stop_id, **info}
-            for stop_id, info in self._stops.items()
-            if query_lower in info["name"].lower()
-        ]
+        """Search stops by name (partial) or stop_code (partial), grouped by name.
+
+        Returns a list of groups, each with:
+            - name:         the stop name
+            - stop_ids:     all platform stop_ids sharing that name
+            - display_name: human-readable label with platform count when > 1
+        """
+        query_stripped = query.strip()
+        query_lower = query_stripped.lower()
+
+        groups: dict[str, list[str]] = {}
+        for stop_id, info in self._stops.items():
+            if query_lower in info["name"].lower() or query_stripped in info.get("code", ""):
+                groups.setdefault(info["name"], []).append(stop_id)
+
+        results = []
+        for name, stop_ids in groups.items():
+            count = len(stop_ids)
+            display_name = (
+                f"{name} ({count} platforms)" if count > 1 else name
+            )
+            results.append({
+                "name": name,
+                "stop_ids": stop_ids,
+                "display_name": display_name,
+            })
+
+        return results
 
     def get_stop_name(self, stop_id: str) -> str:
         """Return the human-readable name for a stop_id."""
@@ -140,6 +161,7 @@ class GtfsStaticManager:
                 stop_id = row["stop_id"]
                 stops[stop_id] = {
                     "name": row.get("stop_name", stop_id),
+                    "code": row.get("stop_code", ""),
                     "lat": _parse_float(row.get("stop_lat")),
                     "lon": _parse_float(row.get("stop_lon")),
                 }
