@@ -1,0 +1,12 @@
+{
+  "domain": "delijn",
+  "name": "De Lijn",
+  "codeowners": ["@arszagi"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/arszagi/hacs-delijn",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/arszagi/hacs-delijn/issues",
+  "requirements": [],
+  "version": "0.0.1"
+}
