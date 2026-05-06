@@ -235,14 +235,14 @@ class DeLijnOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None):
         return self.async_show_menu(
             step_id="init",
-            menu_options={
-                "add_stop": "Add a stop",
-                "remove_stop": "Remove a stop",
-                "change_api_key": "Change API key",
-                "change_interval": "Change refresh interval",
-                "change_language": "Change display language",
-                "force_cache_refresh": "Force stop data refresh",
-            },
+            menu_options=[
+                "add_stop",
+                "remove_stop",
+                "change_api_key",
+                "change_interval",
+                "change_language",
+                "force_cache_refresh",
+            ],
         )
 
     # Add stop
