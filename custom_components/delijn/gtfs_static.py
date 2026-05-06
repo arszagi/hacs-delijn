@@ -122,6 +122,10 @@ class GtfsStaticManager:
         """Return the human-readable name for a stop_id."""
         return self._stops.get(stop_id, {}).get("name", stop_id)
 
+    def get_stop_code(self, stop_id: str) -> str:
+        """Return the public stop code (number printed on the sign) for a stop_id."""
+        return self._stops.get(stop_id, {}).get("code", "")
+
     def get_trip_info(self, trip_id: str) -> dict | None:
         """Return {route_short_name, headsign, direction_id, route_id} for a trip_id."""
         return self._trips.get(trip_id)

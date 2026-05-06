@@ -76,11 +76,13 @@ async def async_setup_entry(
             # One alert sensor per stop
             if stop_id not in created_alert_keys:
                 created_alert_keys.add(stop_id)
+                stop_code = gtfs_manager.get_stop_code(stop_id)
                 new_entities.append(
                     DeLijnAlertSensor(
                         coordinator=coordinator,
                         stop_id=stop_id,
                         stop_name=stop_name,
+                        stop_code=stop_code,
                     )
                 )
 
@@ -222,13 +224,14 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
         coordinator: DeLijnCoordinator,
         stop_id: str,
         stop_name: str,
+        stop_code: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._stop_id = stop_id
         self._stop_name = stop_name
 
         self._attr_unique_id = f"{DOMAIN}_{stop_id}_alerts"
-        self._attr_name = "Service alerts"
+        self._attr_name = f"Service alerts ({stop_code})" if stop_code else "Service alerts"
         self.entity_id = f"sensor.delijn_alerts_{_slugify(stop_name)}"
 
     @property
