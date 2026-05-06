@@ -118,10 +118,14 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
+            if user_input["stop_id"] == "__back__":
+                return await self.async_step_add_stop()
             group = self._search_results[user_input["stop_id"]]
             return await self._add_group_and_confirm(group)
 
-        options = {display_name: display_name for display_name in self._search_results}
+        options = {"__back__": "← Search again"} | {
+            display_name: display_name for display_name in self._search_results
+        }
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({
@@ -232,10 +236,14 @@ class DeLijnOptionsFlow(OptionsFlow):
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
+            if user_input["stop_id"] == "__back__":
+                return await self.async_step_add_stop()
             group = self._search_results[user_input["stop_id"]]
             return await self._save_new_group(group)
 
-        options = {name: name for name in self._search_results}
+        options = {"__back__": "← Search again"} | {
+            name: name for name in self._search_results
+        }
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({

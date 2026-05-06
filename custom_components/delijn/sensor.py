@@ -259,7 +259,7 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
                     "header": a["header"],
                     "description": a["description"],
                     "url": a["url"],
-                    "active_until": _format_time(a["active_until"]) if a.get("active_until") else None,
+                    "active_until": _format_time(a["active_until"]) if a.get("active_until") else "ongoing",
                 }
                 for a in alerts
             ]

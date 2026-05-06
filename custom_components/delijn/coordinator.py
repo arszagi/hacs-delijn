@@ -136,24 +136,31 @@ class DeLijnCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def _extract_alerts(self, feed: dict, stop_id: str, now: float) -> list[dict]:
-        """Find active alerts relevant to the routes serving stop_id."""
-        # Collect route_ids that currently serve this stop (from trip data in memory)
+        """Find active alerts relevant to the routes serving stop_id.
+
+        If no route_ids are known yet (no buses in RT feed), returns an empty
+        list rather than dumping the entire network alert feed.
+        """
         relevant_route_ids = self._get_route_ids_for_stop(stop_id)
+
+        # Without known routes we cannot filter meaningfully — show nothing
+        if not relevant_route_ids:
+            return []
+
         active_alerts = []
 
         for entity in feed.get("entity", []):
             alert = entity.get("alert", {})
-
-            # Check if this alert is active right now
             active_periods = alert.get("activePeriod", [])
+
             if active_periods and not _is_alert_active(active_periods, now):
                 continue
 
-            # Check if this alert concerns any of our stop's routes
             informed = alert.get("informedEntity", [])
-            if relevant_route_ids and not _alert_affects_routes(informed, relevant_route_ids):
+            if not _alert_affects_routes(informed, relevant_route_ids):
                 continue
 
+            end_ts = _parse_timestamp(active_periods[0].get("end")) if active_periods else None
             active_alerts.append({
                 "header": _get_translation(alert.get("headerText")),
                 "description": _get_translation(alert.get("descriptionText")),
@@ -161,7 +168,8 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 "cause": alert.get("cause", 0),
                 "effect": alert.get("effect", 0),
                 "active_from": _parse_timestamp(active_periods[0].get("start")) if active_periods else None,
-                "active_until": _parse_timestamp(active_periods[0].get("end")) if active_periods else None,
+                # Treat timestamp 0 as "no end date" (open-ended alert)
+                "active_until": end_ts if end_ts else None,
             })
 
         return active_alerts

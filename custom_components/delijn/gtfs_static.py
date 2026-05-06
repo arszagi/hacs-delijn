@@ -160,8 +160,8 @@ class GtfsStaticManager:
                     continue
                 stop_id = row["stop_id"]
                 stops[stop_id] = {
-                    "name": row.get("stop_name", stop_id),
-                    "code": row.get("stop_code", ""),
+                    "name": row.get("stop_name", stop_id).strip(),
+                    "code": row.get("stop_code", "").strip(),
                     "lat": _parse_float(row.get("stop_lat")),
                     "lon": _parse_float(row.get("stop_lon")),
                 }

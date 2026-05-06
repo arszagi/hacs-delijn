@@ -18,7 +18,7 @@
       },
       "select_stop": {
         "title": "Select a stop",
-        "description": "Multiple stops were found. Select the one you want to add.",
+        "description": "Multiple stops were found. Select the one you want to add, or choose **← Search again** to go back and refine your search.",
         "data": {
           "stop_id": "Stop"
         }
