@@ -51,19 +51,42 @@ class DeLijnApiClient:
     async def fetch_realtime(
         self, entiteitnummer: str, haltenummer: str, max_departures: int = 10
     ) -> dict:
-        """Fetch real-time departures for a stop."""
+        """Fetch real-time departures for a single stop."""
         return await self._get(
             f"/haltes/{entiteitnummer}/{haltenummer}/real-time",
             params={"maxAantalDoorkomsten": max_departures},
         )
 
-    async def fetch_disruptions(self, entiteitnummer: str, haltenummer: str) -> dict:
-        """Fetch active disruptions and diversions for a stop.
+    async def fetch_realtime_batch(self, haltesleutels: str, max_departures: int = 10) -> dict:
+        """Fetch real-time departures for multiple stops in one call.
 
-        The /storingen endpoint returns both storingen (breakdowns/incidents)
-        and omleidingen (route diversions) in the same response object.
+        haltesleutels format: "{entity}_{halte}_{entity}_{halte}_..."
+        e.g. "3_354661_3_304660_3_304661"
         """
+        return await self._get(
+            f"/haltes/lijst/{haltesleutels}/real-time",
+            params={"maxAantalDoorkomsten": max_departures},
+        )
+
+    async def fetch_disruptions(self, entiteitnummer: str, haltenummer: str) -> dict:
+        """Fetch active disruptions and diversions for a single stop."""
         return await self._get(f"/haltes/{entiteitnummer}/{haltenummer}/storingen")
+
+    async def fetch_disruptions_batch(self, haltesleutels: str) -> dict:
+        """Fetch disruptions for multiple stops in one call."""
+        return await self._get(f"/haltes/lijst/{haltesleutels}/storingen")
+
+    async def fetch_timetable(
+        self, entiteitnummer: str, haltenummer: str, date: str | None = None
+    ) -> dict:
+        """Fetch the full scheduled timetable for a stop (fallback when RT unavailable).
+
+        date format: YYYY-MM-DD. Defaults to today.
+        """
+        params = {"datum": date} if date else {}
+        return await self._get(
+            f"/haltes/{entiteitnummer}/{haltenummer}/dienstregelingen", params=params
+        )
 
     async def fetch_lines_for_stop(self, entiteitnummer: str, haltenummer: str) -> list[dict]:
         """Fetch the line directions serving a stop."""
@@ -77,6 +100,14 @@ class DeLijnApiClient:
         return await self._get(
             f"/lijnen/{entiteitnummer}/{lijnnummer}/lijnrichtingen/{richting}/omleidingen"
         )
+
+    async def fetch_line_colors_batch(self, lijnsleutels: str) -> dict:
+        """Fetch badge colors for multiple lines in one call.
+
+        lijnsleutels format: "{entity}_{lijn}_{entity}_{lijn}_..."
+        e.g. "3_170_3_171"
+        """
+        return await self._get(f"/lijnen/lijst/{lijnsleutels}/lijnkleuren")
 
     async def fetch_line_colors(self, entiteitnummer: str, lijnnummer: str) -> dict | None:
         """Return the 4 color codes for a line badge (voorgrond, achtergrond, etc.)."""

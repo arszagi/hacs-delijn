@@ -10,7 +10,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api_client import DeLijnApiClient, DeLijnApiError
 from .const import (
-    CONF_LANGUAGE,
     DEFAULT_LANGUAGE,
     DOMAIN,
     LANG_FR,
@@ -82,42 +81,70 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         self._line_color_cache: dict[tuple, dict] = {}
 
     async def _async_update_data(self) -> dict:
-        """Fetch real-time data for all configured stops in parallel."""
-        tasks = {
-            stop["key"]: self._fetch_stop_data(stop)
-            for stop in self.stops
-        }
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        """Fetch real-time data for all configured stops using batch API calls."""
+        if not self.stops:
+            return {}
 
-        data = {}
-        for stop_key, result in zip(tasks.keys(), results):
-            if isinstance(result, Exception):
-                _LOGGER.warning("Failed to fetch data for stop %s: %s", stop_key, result)
-                data[stop_key] = {"departures": [], "alerts": []}
-            else:
-                data[stop_key] = result
-
-        return data
-
-    async def _fetch_stop_data(self, stop: dict) -> dict:
-        """Fetch departures and alerts for a single stop."""
-        entity = stop["entiteitnummer"]
-        number = stop["haltenummer"]
+        # One string with all stop keys: "3_354661_3_304660_3_304661"
+        batch_key = "_".join(
+            f"{s['entiteitnummer']}_{s['haltenummer']}" for s in self.stops
+        )
 
         try:
-            realtime_data, disruption_data = await asyncio.gather(
-                self._api_client.fetch_realtime(entity, number, MAX_DEPARTURES),
-                self._api_client.fetch_disruptions(entity, number),
+            rt_data, dis_data = await asyncio.gather(
+                self._api_client.fetch_realtime_batch(batch_key, MAX_DEPARTURES),
+                self._api_client.fetch_disruptions_batch(batch_key),
             )
         except DeLijnApiError as err:
-            raise UpdateFailed(f"API error for stop {stop['key']}: {err}") from err
+            raise UpdateFailed(f"De Lijn API error: {err}") from err
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Connection error: {err}") from err
 
-        return {
-            "departures": await self._parse_departures(realtime_data, entity),
-            "alerts": self._parse_alerts(disruption_data),
-        }
+        # Build lookups: haltenummer → data
+        rt_lookup = _build_rt_lookup(rt_data)
+        dis_lookup = _build_disruption_lookup(dis_data)
+
+        result = {}
+        for stop in self.stops:
+            number = stop["haltenummer"]
+            entity = stop["entiteitnummer"]
+
+            departures = await self._parse_departures(
+                {"halteDoorkomsten": rt_lookup.get(number, [])}, entity
+            )
+
+            # Fallback to full-day timetable when RT has no upcoming data
+            if not departures:
+                departures = await self._fetch_timetable_fallback(stop)
+
+            result[stop["key"]] = {
+                "departures": departures,
+                "alerts": self._parse_alerts(dis_lookup.get(number, {})),
+            }
+
+        # Pre-warm color cache for any newly discovered lines
+        await self._batch_resolve_new_line_colors(result)
+
+        return result
+
+    async def _fetch_timetable_fallback(self, stop: dict) -> list[dict]:
+        """Load the scheduled timetable when RT has no upcoming departures.
+
+        Returns departures with prediction='GEENREALTIME' so the sensor
+        can indicate these are scheduled times, not live data.
+        """
+        try:
+            data = await self._api_client.fetch_timetable(
+                stop["entiteitnummer"], stop["haltenummer"]
+            )
+        except DeLijnApiError:
+            return []
+
+        departures = await self._parse_departures(data, stop["entiteitnummer"])
+        for dep in departures:
+            if not dep.get("prediction"):
+                dep["prediction"] = "GEENREALTIME"
+        return departures
 
     # ------------------------------------------------------------------
     # Departures
@@ -169,6 +196,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 display_dest = (dest_fr if self.language == LANG_FR and dest_fr else dest_nl)
 
                 departures.append({
+                    "_internal_line": internal_num,  # kept for batch color lookup
                     "line": public_num or internal_num,
                     "direction": doorkomst.get("richting") or "",
                     "destination": display_dest,
@@ -186,6 +214,54 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         # Sort by effective departure time
         departures.sort(key=lambda d: d.get("realtime") or d.get("scheduled") or "")
         return departures[:MAX_DEPARTURES]
+
+    async def _batch_resolve_new_line_colors(self, result: dict) -> None:
+        """Pre-warm the color cache for all new lines discovered in this update cycle.
+
+        Collects uncached (entity, internal_line) pairs across all stops and
+        fetches their colors in a single batch call.
+        """
+        new_keys = []
+        for stop in self.stops:
+            for dep in result.get(stop["key"], {}).get("departures", []):
+                internal = dep.get("_internal_line", "")
+                entity = stop["entiteitnummer"]
+                if internal and (entity, internal) not in self._line_color_cache:
+                    new_keys.append((entity, internal))
+
+        if not new_keys:
+            return
+
+        lijnsleutels = "_".join(f"{e}_{l}" for e, l in dict.fromkeys(new_keys))
+        try:
+            data = await self._api_client.fetch_line_colors_batch(lijnsleutels)
+            # The spec has a typo: "lijnLijnkleurCodesijst" (missing "l")
+            items = data.get("lijnLijnkleurCodesijst") or data.get("lijnLijnkleurCodeslijst") or []
+            for item in items:
+                lijn = item.get("lijn") or {}
+                e = str(lijn.get("entiteitnummer", ""))
+                n = str(lijn.get("lijnnummer", ""))
+                codes = item.get("lijnkleurCodes") or {}
+                if e and n:
+                    colors = await self._resolve_colors_from_codes(codes)
+                    self._line_color_cache[(e, n)] = colors
+                    _LOGGER.debug("Batch cached colors for line %s: %s", n, colors)
+        except DeLijnApiError as err:
+            _LOGGER.debug("Batch color fetch failed, will fall back to individual: %s", err)
+
+    async def _resolve_colors_from_codes(self, codes: dict) -> dict:
+        """Resolve a lijnkleurCodes object to hex values."""
+        mapping = {
+            "badge_background": (codes.get("achtergrond") or {}).get("code"),
+            "badge_text": (codes.get("voorgrond") or {}).get("code"),
+            "badge_border": (codes.get("achtergrondRand") or {}).get("code"),
+            "badge_text_border": (codes.get("voorgrondRand") or {}).get("code"),
+        }
+        return {
+            attr: await self._resolve_color_code(code)
+            for attr, code in mapping.items()
+            if code and await self._resolve_color_code(code)
+        }
 
     async def _resolve_line_colors(self, entiteitnummer: str, lijnnummer: str) -> dict:
         """Return the 4 badge colors for a line, fetched once and cached.
@@ -276,6 +352,30 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 })
 
         return alerts
+
+
+def _build_rt_lookup(batch_data: dict) -> dict:
+    """Build haltenummer → list[HalteDoorkomst] from a batch real-time response."""
+    lookup: dict[str, list] = {}
+    for item in batch_data.get("halteDoorkomstenLijst", []):
+        for hdc in item.get("halteDoorkomsten", []):
+            number = str(hdc.get("haltenummer", ""))
+            if number:
+                lookup.setdefault(number, []).append(hdc)
+    return lookup
+
+
+def _build_disruption_lookup(batch_data: dict) -> dict:
+    """Build haltenummer → disruption dict from a batch storingen response."""
+    lookup: dict[str, dict] = {}
+    for item in batch_data.get("halteOmleidingen", []):
+        halte = item.get("halte") or {}
+        number = str(halte.get("haltenummer", ""))
+        if number:
+            # Merge omleidingen from this item into a single dict matching single-stop format
+            existing = lookup.setdefault(number, {"omleidingen": [], "storingen": []})
+            existing["omleidingen"].extend(item.get("omleidingen") or [])
+    return lookup
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
