@@ -1,5 +1,10 @@
 # De Lijn — Home Assistant Integration
 
+> [!WARNING]
+> **This integration is currently in active development and is not ready for use.**
+> Functionality may be incomplete, unstable or subject to breaking changes at any time.
+> Do not use in a production Home Assistant environment.
+
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.0.3-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
