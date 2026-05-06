@@ -78,6 +78,16 @@ class DeLijnApiClient:
             f"/lijnen/{entiteitnummer}/{lijnnummer}/lijnrichtingen/{richting}/omleidingen"
         )
 
+    async def fetch_public_line_number(
+        self, entiteitnummer: str, lijnnummer: str
+    ) -> str | None:
+        """Return the public-facing line number (e.g. 'R70') for an internal lijnnummer."""
+        try:
+            data = await self._get(f"/lijnen/{entiteitnummer}/{lijnnummer}")
+            return data.get("lijnnummerPubliek") or None
+        except DeLijnApiError:
+            return None
+
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------

@@ -70,6 +70,8 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         )
         self._api_client = api_client
         self.stops = stops  # mutable — updated when stops are added/removed
+        # Cache: (entiteitnummer, lijnnummer) → public line number (e.g. "R70")
+        self._public_line_cache: dict[tuple, str] = {}
 
     async def _async_update_data(self) -> dict:
         """Fetch real-time data for all configured stops in parallel."""
@@ -105,7 +107,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Connection error: {err}") from err
 
         return {
-            "departures": self._parse_departures(realtime_data),
+            "departures": await self._parse_departures(realtime_data, entity),
             "alerts": self._parse_alerts(disruption_data),
         }
 
@@ -113,7 +115,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
     # Departures
     # ------------------------------------------------------------------
 
-    def _parse_departures(self, data: dict) -> list[dict]:
+    async def _parse_departures(self, data: dict, entiteitnummer: str) -> list[dict]:
         """Extract and sort upcoming departures from real-time API response."""
         departures = []
         now = datetime.now(timezone.utc)
@@ -124,7 +126,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 if isinstance(statuses, str):
                     statuses = [statuses]
 
-                # Skip already-passed and cancelled departures
+                # Skip already-passed departures
                 if PREDICTION_PASSED in statuses:
                     continue
 
@@ -139,7 +141,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 scheduled_dt = _parse_datetime(scheduled_str)
                 realtime_dt = _parse_datetime(realtime_str)
 
-                # Skip if scheduled time is in the past (and no RT override)
+                # Skip past departures (unless cancelled — show those for awareness)
                 effective_dt = realtime_dt or scheduled_dt
                 if effective_dt and effective_dt < now and not cancelled:
                     continue
@@ -149,8 +151,11 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                     delta = realtime_dt - scheduled_dt
                     delay_minutes = round(delta.total_seconds() / 60, 1)
 
+                internal_num = str(doorkomst.get("lijnnummer") or "")
+                public_num = await self._resolve_public_line(entiteitnummer, internal_num)
+
                 departures.append({
-                    "line": str(doorkomst.get("lijnnummer") or ""),
+                    "line": public_num or internal_num,
                     "direction": doorkomst.get("richting") or "",
                     "destination": (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip(),
                     "destination_fr": (doorkomst.get("bestemmingKortFrans") or "").strip(),
@@ -165,6 +170,23 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         # Sort by effective departure time
         departures.sort(key=lambda d: d.get("realtime") or d.get("scheduled") or "")
         return departures[:MAX_DEPARTURES]
+
+    async def _resolve_public_line(self, entiteitnummer: str, lijnnummer: str) -> str | None:
+        """Return the public line number (e.g. 'R70') for an internal lijnnummer.
+
+        Results are cached in memory so each unique line is only fetched once.
+        """
+        if not lijnnummer:
+            return None
+        cache_key = (entiteitnummer, lijnnummer)
+        if cache_key in self._public_line_cache:
+            return self._public_line_cache[cache_key]
+
+        public = await self._api_client.fetch_public_line_number(entiteitnummer, lijnnummer)
+        if public:
+            self._public_line_cache[cache_key] = public
+            _LOGGER.debug("Line %s (entity %s) → public: %s", lijnnummer, entiteitnummer, public)
+        return public
 
     # ------------------------------------------------------------------
     # Alerts
