@@ -1,7 +1,6 @@
 # De Lijn — Home Assistant Integration
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.2.4-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
 [![HACS Action](https://github.com/arszagi/hacs-delijn/actions/workflows/hacs.yml/badge.svg)](https://github.com/arszagi/hacs-delijn/actions/workflows/hacs.yml)
 [![Hassfest](https://github.com/arszagi/hacs-delijn/actions/workflows/hassfest.yml/badge.svg)](https://github.com/arszagi/hacs-delijn/actions/workflows/hassfest.yml)
