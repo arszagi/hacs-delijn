@@ -91,9 +91,10 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         )
 
         try:
-            rt_data, dis_data = await asyncio.gather(
+            rt_data, storingen_data, omleidingen_data = await asyncio.gather(
                 self._api_client.fetch_realtime_batch(batch_key, MAX_DEPARTURES),
                 self._api_client.fetch_disruptions_batch(batch_key),
+                self._api_client.fetch_omleidingen_batch(batch_key),
             )
         except DeLijnApiError as err:
             raise UpdateFailed(f"De Lijn API error: {err}") from err
@@ -102,7 +103,8 @@ class DeLijnCoordinator(DataUpdateCoordinator):
 
         # Build lookups: haltenummer → data
         rt_lookup = _build_rt_lookup(rt_data)
-        dis_lookup = _build_disruption_lookup(dis_data)
+        # Merge storingen + omleidingen per stop
+        dis_lookup = _build_disruption_lookup(storingen_data, omleidingen_data)
 
         result = {}
         for stop in self.stops:
@@ -365,16 +367,19 @@ def _build_rt_lookup(batch_data: dict) -> dict:
     return lookup
 
 
-def _build_disruption_lookup(batch_data: dict) -> dict:
-    """Build haltenummer → disruption dict from a batch storingen response."""
+def _build_disruption_lookup(storingen_data: dict, omleidingen_data: dict) -> dict:
+    """Merge storingen and omleidingen batch responses into a per-stop dict."""
     lookup: dict[str, dict] = {}
-    for item in batch_data.get("halteOmleidingen", []):
-        halte = item.get("halte") or {}
-        number = str(halte.get("haltenummer", ""))
-        if number:
-            # Merge omleidingen from this item into a single dict matching single-stop format
+
+    for source, key in [(storingen_data, "storingen"), (omleidingen_data, "omleidingen")]:
+        for item in source.get("halteOmleidingen", []):
+            halte = item.get("halte") or {}
+            number = str(halte.get("haltenummer", ""))
+            if not number:
+                continue
             existing = lookup.setdefault(number, {"omleidingen": [], "storingen": []})
-            existing["omleidingen"].extend(item.get("omleidingen") or [])
+            existing[key].extend(item.get("omleidingen") or item.get("storingen") or [])
+
     return lookup
 
 

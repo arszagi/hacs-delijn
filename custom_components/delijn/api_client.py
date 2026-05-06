@@ -73,8 +73,12 @@ class DeLijnApiClient:
         return await self._get(f"/haltes/{entiteitnummer}/{haltenummer}/storingen")
 
     async def fetch_disruptions_batch(self, haltesleutels: str) -> dict:
-        """Fetch disruptions for multiple stops in one call."""
+        """Fetch storingen for multiple stops in one call."""
         return await self._get(f"/haltes/lijst/{haltesleutels}/storingen")
+
+    async def fetch_omleidingen_batch(self, haltesleutels: str) -> dict:
+        """Fetch omleidingen (route diversions) for multiple stops in one call."""
+        return await self._get(f"/haltes/lijst/{haltesleutels}/omleidingen")
 
     async def fetch_timetable(
         self, entiteitnummer: str, haltenummer: str, date: str | None = None
