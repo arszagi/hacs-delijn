@@ -138,15 +138,12 @@ class DeLijnCoordinator(DataUpdateCoordinator):
     def _extract_alerts(self, feed: dict, stop_id: str, now: float) -> list[dict]:
         """Find active alerts relevant to the routes serving stop_id.
 
-        If no route_ids are known yet (no buses in RT feed), returns an empty
-        list rather than dumping the entire network alert feed.
+        Two categories are included:
+        - Agency-wide alerts (no routeId in informedEntity) — always shown,
+          even when no buses are in the RT feed (e.g. full service outage).
+        - Route-specific alerts — shown only when the route serves this stop.
         """
         relevant_route_ids = self._get_route_ids_for_stop(stop_id)
-
-        # Without known routes we cannot filter meaningfully — show nothing
-        if not relevant_route_ids:
-            return []
-
         active_alerts = []
 
         for entity in feed.get("entity", []):
@@ -157,7 +154,13 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 continue
 
             informed = alert.get("informedEntity", [])
-            if not _alert_affects_routes(informed, relevant_route_ids):
+            agency_wide = _is_agency_wide_alert(informed)
+
+            # Skip route-specific alerts when we don't know our routes yet
+            if not agency_wide and not relevant_route_ids:
+                continue
+
+            if not agency_wide and not _alert_affects_routes(informed, relevant_route_ids):
                 continue
 
             end_ts = _parse_timestamp(active_periods[0].get("end")) if active_periods else None
@@ -168,7 +171,6 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 "cause": alert.get("cause", 0),
                 "effect": alert.get("effect", 0),
                 "active_from": _parse_timestamp(active_periods[0].get("start")) if active_periods else None,
-                # Treat timestamp 0 as "no end date" (open-ended alert)
                 "active_until": end_ts if end_ts else None,
             })
 
@@ -208,6 +210,14 @@ def _is_alert_active(active_periods: list, now: float) -> bool:
         start = _parse_timestamp(period.get("start")) or 0
         end = _parse_timestamp(period.get("end"))
         if start <= now and (end is None or now <= end):
+            return True
+    return False
+
+
+def _is_agency_wide_alert(informed_entities: list) -> bool:
+    """Return True if the alert targets the whole agency with no specific route."""
+    for entity in informed_entities:
+        if entity.get("agencyId") and not entity.get("routeId"):
             return True
     return False
 
