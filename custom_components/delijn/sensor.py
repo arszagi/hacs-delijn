@@ -134,7 +134,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             identifiers={(DOMAIN, _slug(stop_name))},
             name=stop_name,
             manufacturer="De Lijn",
-            model=_translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
+            model=_group_model(stop_name, self.coordinator.stops, self.coordinator.language),
         )
 
     @property
@@ -164,7 +164,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             ATTR_STOP_NUMBER: self._stop["haltenummer"],
             ATTR_STOP_TYPE: _translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
             ATTR_LINE: self._line,
-            ATTR_DIRECTION: self._direction,
+            ATTR_DIRECTION: _translate_direction(self._direction, self.coordinator.language),
             ATTR_LAST_UPDATED: datetime.now(timezone.utc).isoformat(),
         }
 
@@ -175,7 +175,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             attrs[ATTR_DESTINATION] = dep.get("destination", "")
             attrs[ATTR_DESTINATION_FR] = dep.get("destination_fr", "")
             attrs[ATTR_VEHICLE_ID] = dep.get("vehicle_id", "")
-            attrs[ATTR_PREDICTION] = dep.get("prediction", "")
+            attrs[ATTR_PREDICTION] = _translate_prediction(dep.get("prediction", ""), self.coordinator.language)
             # Badge colors (all 4, for use in custom Lovelace cards)
             for color_attr in (ATTR_BADGE_BACKGROUND, ATTR_BADGE_TEXT, ATTR_BADGE_BORDER, ATTR_BADGE_TEXT_BORDER):
                 if val := dep.get(color_attr):
@@ -187,6 +187,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
                 "realtime": _format_time(d.get("realtime")),
                 "delay_minutes": d.get("delay_minutes"),
                 "destination": d.get("destination", ""),
+                "prediction": _translate_prediction(d.get("prediction", ""), self.coordinator.language),
                 "cancelled": d.get("cancelled", False),
             }
             for d in all_deps[1:5]
@@ -235,7 +236,7 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             identifiers={(DOMAIN, _slug(stop_name))},
             name=stop_name,
             manufacturer="De Lijn",
-            model=_translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
+            model=_group_model(stop_name, self.coordinator.stops, self.coordinator.language),
         )
 
     @property
@@ -268,6 +269,60 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 # ------------------------------------------------------------------
 # Utilities
 # ------------------------------------------------------------------
+
+def _group_model(stop_name: str, all_stops: list[dict], language: str) -> str:
+    """Build the device model string for a stop group.
+
+    Shows the stop numbers and combined stop types for all platforms
+    sharing the same name, e.g. '304660, 304661, 354661 · Régulier + Temporaire'.
+    """
+    group = [s for s in all_stops if s.get("name") == stop_name]
+    if not group:
+        return ""
+
+    numbers = ", ".join(s["haltenummer"] for s in group)
+
+    # Unique classifications in order of appearance
+    seen = []
+    for s in group:
+        c = s.get("classificatie", "REGULIER")
+        if c not in seen:
+            seen.append(c)
+
+    types = " + ".join(_translate_stop_type(c, language) for c in seen)
+    return f"{numbers} · {types}"
+
+
+_DIRECTION_LABELS = {
+    LANG_FR: {"HEEN": "Aller",  "TERUG": "Retour"},
+    "nl":    {"HEEN": "Heen",   "TERUG": "Terug"},
+}
+
+_PREDICTION_LABELS = {
+    LANG_FR: {
+        "REALTIME":    "Temps réel",
+        "GEENREALTIME": "Horaire",
+        "GESCHRAPT":   "Annulé",
+        "VERSTREKEN":  "Passé",
+    },
+    "nl": {
+        "REALTIME":    "Realtime",
+        "GEENREALTIME": "Dienstregeling",
+        "GESCHRAPT":   "Geschrapt",
+        "VERSTREKEN":  "Verstreken",
+    },
+}
+
+
+def _translate_direction(direction: str, language: str) -> str:
+    lang = LANG_FR if language == LANG_FR else "nl"
+    return _DIRECTION_LABELS[lang].get(direction, direction)
+
+
+def _translate_prediction(prediction: str, language: str) -> str:
+    lang = LANG_FR if language == LANG_FR else "nl"
+    return _PREDICTION_LABELS[lang].get(prediction, prediction)
+
 
 _STOP_TYPE_LABELS = {
     LANG_FR: {
