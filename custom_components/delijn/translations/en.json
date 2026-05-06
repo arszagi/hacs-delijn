@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "De Lijn — API Configuration",
-        "description": "Enter your Belgian Mobility open data API key.",
+        "description": "Enter your De Lijn Open Data API key.",
         "data": {
           "api_key": "API Key",
           "scan_interval": "Refresh interval (seconds, min. 30)"
@@ -11,35 +11,44 @@
       },
       "add_stop": {
         "title": "Search for a stop",
-        "description": "Search by **name** to get all platforms at that stop grouped together, or by **stop number** (printed on the stop sign) to monitor a single specific platform.",
+        "description": "Search by **name** to get all platforms grouped together, or by **stop number** (printed on the stop sign) to monitor a single specific platform.",
         "data": {
           "stop_search": "Stop name or number"
         }
       },
       "select_stop": {
         "title": "Select a stop",
-        "description": "Multiple stops were found. Select the one you want to add, or choose **← Search again** to go back and refine your search.",
+        "description": "Select a stop, or choose **← Search again** to refine your search.",
         "data": {
-          "stop_id": "Stop"
+          "stop_key": "Stop"
+        }
+      },
+      "confirm_stop": {
+        "title": "Confirm stop",
+        "description": "{warning}Add this stop?",
+        "data": {
+          "action": "Action"
         }
       },
       "confirm_stops": {
-        "title": "Stops configured",
-        "description": "The following stops will be monitored:\n{stops}\n\nDo you want to add another stop?",
-        "menu_options": {
-          "add_another": "Add another stop",
-          "finish": "Finish"
+        "title": "Configured stops",
+        "description": "The following stops will be monitored:\n{stops}",
+        "data": {
+          "action": "Action"
         }
       }
     },
     "error": {
       "invalid_api_key": "Invalid API key or API unreachable.",
       "no_stops_found": "No stops found matching your search.",
+      "query_too_short": "Please enter at least 2 characters.",
+      "interval_too_low": "Minimum refresh interval is 30 seconds.",
       "cannot_connect": "Unable to connect to the De Lijn API.",
-      "gtfs_download_failed": "Failed to download GTFS schedule data."
+      "cache_download_failed": "Failed to download stop data."
     },
     "abort": {
-      "already_configured": "De Lijn is already configured."
+      "already_configured": "De Lijn is already configured.",
+      "cache_download_failed": "Failed to download stop data."
     }
   },
   "options": {
@@ -51,26 +60,35 @@
           "remove_stop": "Remove a stop",
           "change_api_key": "Change API key",
           "change_interval": "Change refresh interval",
-          "force_gtfs_refresh": "Force schedule data refresh"
+          "force_cache_refresh": "Force stop data refresh"
         }
       },
       "add_stop": {
         "title": "Add a stop",
+        "description": "Search by name or stop number.",
         "data": {
           "stop_search": "Stop name or number"
         }
       },
       "select_stop": {
         "title": "Select a stop",
+        "description": "Select a stop, or choose **← Search again** to refine your search.",
         "data": {
-          "stop_id": "Stop"
+          "stop_key": "Stop"
+        }
+      },
+      "confirm_stop": {
+        "title": "Confirm stop",
+        "description": "{warning}Add this stop?",
+        "data": {
+          "action": "Action"
         }
       },
       "remove_stop": {
         "title": "Remove a stop",
-        "description": "Select the stops to remove.",
+        "description": "Select the stop to remove.",
         "data": {
-          "stop_ids": "Stops to remove"
+          "stop_key": "Stop to remove"
         }
       },
       "change_api_key": {
@@ -85,15 +103,19 @@
           "scan_interval": "Refresh interval (seconds, min. 30)"
         }
       },
-      "force_gtfs_refresh": {
-        "title": "Force schedule data refresh",
-        "description": "This will re-download the full De Lijn schedule data (±200 MB). Continue?"
+      "force_cache_refresh": {
+        "title": "Force stop data refresh",
+        "description": "This will re-download all De Lijn stop data. Continue?",
+        "data": {
+          "confirm": "Yes, refresh now"
+        }
       }
     },
     "error": {
       "invalid_api_key": "Invalid API key or API unreachable.",
       "no_stops_found": "No stops found matching your search.",
-      "gtfs_download_failed": "Failed to download GTFS schedule data."
+      "query_too_short": "Please enter at least 2 characters.",
+      "interval_too_low": "Minimum refresh interval is 30 seconds."
     }
   }
 }

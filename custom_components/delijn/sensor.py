@@ -14,19 +14,22 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_ALERTS,
     ATTR_DELAY_MINUTES,
-    ATTR_DIRECTION_ID,
-    ATTR_HEADSIGN,
+    ATTR_DESTINATION,
+    ATTR_DESTINATION_FR,
+    ATTR_DIRECTION,
     ATTR_LAST_UPDATED,
     ATTR_LINE,
     ATTR_NEXT_DEPARTURES,
-    ATTR_REALTIME_DEPARTURE,
-    ATTR_ROUTE_ID,
-    ATTR_SCHEDULED_DEPARTURE,
-    ATTR_STOP_ID,
+    ATTR_PREDICTION,
+    ATTR_REALTIME,
+    ATTR_SCHEDULED,
     ATTR_STOP_NAME,
+    ATTR_STOP_NUMBER,
+    ATTR_STOP_TYPE,
     ATTR_VEHICLE_ID,
+    CLASSIFICATIE_TIJDELIJK,
     DOMAIN,
-    MAX_UPCOMING_DEPARTURES,
+    PREDICTION_CANCELLED,
 )
 from .coordinator import DeLijnCoordinator
 
@@ -38,62 +41,46 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up De Lijn sensors and register a listener for dynamic entity discovery."""
+    """Set up sensors and register a listener for dynamic entity discovery."""
     coordinator: DeLijnCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    gtfs_manager = hass.data[DOMAIN][entry.entry_id]["gtfs_manager"]
 
-    # Track which (stop_id, line, direction_id) sensors have already been created
     created_departure_keys: set[tuple] = set()
     created_alert_keys: set[str] = set()
 
     @callback
-    def _discover_and_add_entities() -> None:
-        """Called on every coordinator update to discover new sensors."""
+    def _discover_entities() -> None:
         if not coordinator.data:
             return
 
         new_entities: list[SensorEntity] = []
 
-        for stop_id, stop_data in coordinator.data.items():
-            stop_name = gtfs_manager.get_stop_name(stop_id)
+        for stop in coordinator.stops:
+            stop_key = stop["key"]
+            stop_data = coordinator.data.get(stop_key, {})
 
-            # One departure sensor per (line, direction_id) combo at this stop
             for departure in stop_data.get("departures", []):
-                key = (stop_id, departure["line"], departure["direction_id"])
-                if key not in created_departure_keys:
-                    created_departure_keys.add(key)
+                sensor_key = (stop_key, departure["line"], departure["direction"])
+                if sensor_key not in created_departure_keys:
+                    created_departure_keys.add(sensor_key)
                     new_entities.append(
                         DeLijnDepartureSensor(
                             coordinator=coordinator,
-                            stop_id=stop_id,
-                            stop_name=stop_name,
+                            stop=stop,
                             line=departure["line"],
-                            headsign=departure["headsign"],
-                            direction_id=departure["direction_id"],
+                            direction=departure["direction"],
+                            destination=departure["destination"],
                         )
                     )
 
-            # One alert sensor per stop
-            if stop_id not in created_alert_keys:
-                created_alert_keys.add(stop_id)
-                stop_code = gtfs_manager.get_stop_code(stop_id)
-                new_entities.append(
-                    DeLijnAlertSensor(
-                        coordinator=coordinator,
-                        stop_id=stop_id,
-                        stop_name=stop_name,
-                        stop_code=stop_code,
-                    )
-                )
+            if stop_key not in created_alert_keys:
+                created_alert_keys.add(stop_key)
+                new_entities.append(DeLijnAlertSensor(coordinator, stop))
 
         if new_entities:
             async_add_entities(new_entities)
 
-    # Register listener so new sensors are created on each coordinator update
-    coordinator.async_add_listener(_discover_and_add_entities)
-
-    # Run discovery immediately with data already fetched
-    _discover_and_add_entities()
+    coordinator.async_add_listener(_discover_entities)
+    _discover_entities()
 
 
 # ------------------------------------------------------------------
@@ -101,9 +88,9 @@ async def async_setup_entry(
 # ------------------------------------------------------------------
 
 class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
-    """Shows the next departure for a specific bus/tram line at a stop.
+    """Shows the next departure for a bus/tram line at a stop.
 
-    State: minutes until the next departure (int), or None when no service.
+    State: minutes until next departure (int), or None/unavailable when no service.
     """
 
     _attr_has_entity_name = True
@@ -113,100 +100,102 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
     def __init__(
         self,
         coordinator: DeLijnCoordinator,
-        stop_id: str,
-        stop_name: str,
+        stop: dict,
         line: str,
-        headsign: str,
-        direction_id: int,
+        direction: str,
+        destination: str,
     ) -> None:
         super().__init__(coordinator)
-        self._stop_id = stop_id
-        self._stop_name = stop_name
+        self._stop = stop
         self._line = line
-        self._headsign = headsign
-        self._direction_id = direction_id
+        self._direction = direction
+        self._destination = destination
 
-        slug_stop = _slugify(stop_name)
-        slug_headsign = _slugify(headsign)
-        direction_label = "inbound" if direction_id == 1 else "outbound"
+        stop_key = stop["key"]
+        dir_label = direction.lower() if direction else "unknown"
 
-        # Unique ID stable across restarts
-        self._attr_unique_id = f"{DOMAIN}_{stop_id}_line_{line}_{direction_label}"
-
-        # Human-readable name: "Line R70 → Bruxelles-Midi"
-        self._attr_name = f"Line {line} → {headsign}" if headsign else f"Line {line}"
-
-        # Entity ID: sensor.delijn_line_r70_sint_pieters_leeuw_to_bruxelles_midi
-        direction_part = f"to_{slug_headsign}" if headsign else direction_label
-        self.entity_id = f"sensor.delijn_line_{_slugify(line)}_{slug_stop}_{direction_part}"
+        self._attr_unique_id = f"{DOMAIN}_{stop_key}_line_{line}_{dir_label}"
+        self._attr_name = f"Line {line} → {destination}" if destination else f"Line {line}"
+        self.entity_id = (
+            f"sensor.delijn_line_{_slug(line)}_{_slug(stop['name'])}_to_{_slug(destination)}"
+            if destination
+            else f"sensor.delijn_line_{_slug(line)}_{_slug(stop['name'])}"
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
-        # Group all platforms with the same stop name under one device
+        stop_name = self._stop["name"]
         return DeviceInfo(
-            identifiers={(DOMAIN, _slugify(self._stop_name))},
-            name=self._stop_name,
+            identifiers={(DOMAIN, _slug(stop_name))},
+            name=stop_name,
             manufacturer="De Lijn",
-            model="Bus Stop",
+            model=_stop_type_label(self._stop.get("classificatie", "")),
         )
 
     @property
     def available(self) -> bool:
-        """Mark unavailable when no upcoming departure is in the RT feed."""
-        return self.coordinator.last_update_success and self._get_next_departure() is not None
+        return self.coordinator.last_update_success and self._next_departure() is not None
 
     @property
     def native_value(self) -> int | None:
-        """Minutes until the next departure."""
-        next_dep = self._get_next_departure()
-        if next_dep is None:
+        dep = self._next_departure()
+        if dep is None:
             return None
-        now = datetime.now(timezone.utc).timestamp()
-        return max(0, int((next_dep["departure_time"] - now) / 60))
+        effective_time = dep.get("realtime") or dep.get("scheduled")
+        if not effective_time:
+            return None
+        dt = _parse_dt(effective_time)
+        if dt is None:
+            return None
+        minutes = max(0, int((dt - datetime.now(timezone.utc)).total_seconds() / 60))
+        return minutes
 
     @property
     def extra_state_attributes(self) -> dict:
-        next_dep = self._get_next_departure()
-        all_deps = self._get_all_departures()
-
-        attrs = {
-            ATTR_STOP_ID: self._stop_id,
-            ATTR_STOP_NAME: self._stop_name,
+        dep = self._next_departure()
+        all_deps = self._all_departures()
+        attrs: dict = {
+            ATTR_STOP_NAME: self._stop["name"],
+            ATTR_STOP_NUMBER: self._stop["haltenummer"],
+            ATTR_STOP_TYPE: self._stop.get("classificatie", ""),
             ATTR_LINE: self._line,
-            ATTR_HEADSIGN: self._headsign,
-            ATTR_DIRECTION_ID: self._direction_id,
+            ATTR_DIRECTION: self._direction,
             ATTR_LAST_UPDATED: datetime.now(timezone.utc).isoformat(),
         }
 
-        if next_dep:
-            attrs[ATTR_REALTIME_DEPARTURE] = _format_time(next_dep["departure_time"])
-            attrs[ATTR_DELAY_MINUTES] = round(next_dep["delay_seconds"] / 60, 1)
-            attrs[ATTR_VEHICLE_ID] = next_dep.get("vehicle_id", "")
-            attrs[ATTR_ROUTE_ID] = next_dep.get("route_id", "")
+        if dep:
+            attrs[ATTR_SCHEDULED] = _format_time(dep.get("scheduled"))
+            attrs[ATTR_REALTIME] = _format_time(dep.get("realtime"))
+            attrs[ATTR_DELAY_MINUTES] = dep.get("delay_minutes")
+            attrs[ATTR_DESTINATION] = dep.get("destination", "")
+            attrs[ATTR_DESTINATION_FR] = dep.get("destination_fr", "")
+            attrs[ATTR_VEHICLE_ID] = dep.get("vehicle_id", "")
+            attrs[ATTR_PREDICTION] = dep.get("prediction", "")
 
-        # Next departures list (excludes the first one already shown in state)
         attrs[ATTR_NEXT_DEPARTURES] = [
             {
-                "realtime_departure": _format_time(d["departure_time"]),
-                "delay_minutes": round(d["delay_seconds"] / 60, 1),
+                "scheduled": _format_time(d.get("scheduled")),
+                "realtime": _format_time(d.get("realtime")),
+                "delay_minutes": d.get("delay_minutes"),
+                "destination": d.get("destination", ""),
+                "cancelled": d.get("cancelled", False),
             }
-            for d in all_deps[1:MAX_UPCOMING_DEPARTURES]
+            for d in all_deps[1:5]
         ]
-
         return attrs
 
-    def _get_all_departures(self) -> list[dict]:
-        """Return all upcoming departures for this (line, direction) at this stop."""
+    def _all_departures(self) -> list[dict]:
         if not self.coordinator.data:
             return []
-        stop_data = self.coordinator.data.get(self._stop_id, {})
+        stop_data = self.coordinator.data.get(self._stop["key"], {})
         return [
             d for d in stop_data.get("departures", [])
-            if d["line"] == self._line and d["direction_id"] == self._direction_id
+            if d["line"] == self._line and d["direction"] == self._direction
+            and not d.get("cancelled")
         ]
 
-    def _get_next_departure(self) -> dict | None:
-        deps = self._get_all_departures()
+    def _next_departure(self) -> dict | None:
+        deps = self._all_departures()
         return deps[0] if deps else None
 
 
@@ -215,61 +204,55 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 # ------------------------------------------------------------------
 
 class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
-    """Shows the number of active service alerts for a stop.
-
-    State: count of active alerts (int).
-    """
+    """Shows active disruptions and diversions for a stop."""
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:alert-circle-outline"
 
-    def __init__(
-        self,
-        coordinator: DeLijnCoordinator,
-        stop_id: str,
-        stop_name: str,
-        stop_code: str = "",
-    ) -> None:
+    def __init__(self, coordinator: DeLijnCoordinator, stop: dict) -> None:
         super().__init__(coordinator)
-        self._stop_id = stop_id
-        self._stop_name = stop_name
+        self._stop = stop
+        stop_key = stop["key"]
+        number = stop["haltenummer"]
 
-        self._attr_unique_id = f"{DOMAIN}_{stop_id}_alerts"
-        self._attr_name = f"Service alerts ({stop_code})" if stop_code else "Service alerts"
-        self.entity_id = f"sensor.delijn_alerts_{_slugify(stop_name)}"
+        self._attr_unique_id = f"{DOMAIN}_{stop_key}_alerts"
+        self._attr_name = f"Service alerts ({number})"
+        self.entity_id = f"sensor.delijn_alerts_{_slug(stop['name'])}_{number}"
 
     @property
     def device_info(self) -> DeviceInfo:
-        # Same device as the departure sensors — grouped by stop name
+        stop_name = self._stop["name"]
         return DeviceInfo(
-            identifiers={(DOMAIN, _slugify(self._stop_name))},
-            name=self._stop_name,
+            identifiers={(DOMAIN, _slug(stop_name))},
+            name=stop_name,
             manufacturer="De Lijn",
-            model="Bus Stop",
+            model=_stop_type_label(self._stop.get("classificatie", "")),
         )
 
     @property
     def native_value(self) -> int:
-        """Number of currently active service alerts."""
         if not self.coordinator.data:
             return 0
-        return len(self.coordinator.data.get(self._stop_id, {}).get("alerts", []))
+        return len(self.coordinator.data.get(self._stop["key"], {}).get("alerts", []))
 
     @property
     def extra_state_attributes(self) -> dict:
         if not self.coordinator.data:
-            return {ATTR_ALERTS: []}
-        alerts = self.coordinator.data.get(self._stop_id, {}).get("alerts", [])
+            return {ATTR_ALERTS: [], ATTR_STOP_TYPE: self._stop.get("classificatie", "")}
+        alerts = self.coordinator.data.get(self._stop["key"], {}).get("alerts", [])
         return {
+            ATTR_STOP_TYPE: self._stop.get("classificatie", ""),
             ATTR_ALERTS: [
                 {
-                    "header": a["header"],
+                    "type": a["type"],
+                    "title": a["title"],
                     "description": a["description"],
-                    "url": a["url"],
-                    "active_until": _format_time(a["active_until"]) if a.get("active_until") else "ongoing",
+                    "start": a.get("start"),
+                    "end": a.get("end") or "ongoing",
+                    "lines": a.get("lines", []),
                 }
                 for a in alerts
-            ]
+            ],
         }
 
 
@@ -277,16 +260,37 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 # Utilities
 # ------------------------------------------------------------------
 
-def _slugify(text: str) -> str:
-    """Convert a human-readable string to a lowercase, underscore-separated slug."""
+def _slug(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^a-z0-9]+", "_", text)
-    text = text.strip("_")
-    return text
+    return text.strip("_")
 
 
-def _format_time(unix_ts: float | None) -> str | None:
-    """Convert a Unix timestamp to a local HH:MM time string."""
-    if unix_ts is None:
+def _parse_dt(iso_str: str | None) -> datetime | None:
+    if not iso_str:
         return None
-    return datetime.fromtimestamp(unix_ts, tz=timezone.utc).astimezone().strftime("%H:%M")
+    try:
+        import zoneinfo
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("Europe/Brussels"))
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_time(iso_str: str | None) -> str | None:
+    dt = _parse_dt(iso_str)
+    if dt is None:
+        return None
+    return dt.astimezone().strftime("%H:%M")
+
+
+def _stop_type_label(classificatie: str) -> str:
+    labels = {
+        "REGULIER": "Bus Stop",
+        "TIJDELIJK": "Temporary Stop",
+        "FLEX": "On-demand Stop",
+        "COMBI": "Combined Stop",
+    }
+    return labels.get(classificatie, "Bus Stop")

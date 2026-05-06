@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator — fetches and processes GTFS-RT data for all configured stops."""
+"""DataUpdateCoordinator — fetches real-time departures and alerts for configured stops."""
 
 import asyncio
 import logging
@@ -11,33 +11,42 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api_client import DeLijnApiClient, DeLijnApiError
 from .const import (
     DOMAIN,
-    MAX_UPCOMING_DEPARTURES,
-    SCHEDULE_RELATIONSHIP_SKIPPED,
+    MAX_DEPARTURES,
+    PREDICTION_CANCELLED,
+    PREDICTION_PASSED,
 )
-from .gtfs_static import GtfsStaticManager
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class DeLijnCoordinator(DataUpdateCoordinator):
-    """Polls the GTFS-RT API and distributes data to all sensor entities.
+    """Polls the De Lijn V1 Core API for all configured stops.
 
     Data structure returned by _async_update_data:
     {
-        stop_id: {
+        "3_354661": {
             "departures": [
                 {
-                    "trip_id", "line", "headsign", "direction_id", "route_id",
-                    "departure_time" (unix float), "delay_seconds" (int),
-                    "vehicle_id" (str), "schedule_relationship" (int)
+                    "line": "171",
+                    "direction": "TERUG",
+                    "destination": "Anderlecht Het Rad",
+                    "destination_fr": "Anderlecht La Roue",
+                    "scheduled": "2026-05-06T12:35:00",
+                    "realtime": "2026-05-06T12:41:07" | None,
+                    "delay_minutes": 6,
+                    "vehicle_id": "5190",
+                    "prediction": "REALTIME",
+                    "cancelled": False,
                 },
-                ...  (sorted by departure_time, upcoming only)
+                ...
             ],
             "alerts": [
                 {
-                    "header", "description", "url",
-                    "cause", "effect",
-                    "active_from" (unix float), "active_until" (unix float)
+                    "title": "Werken op de Bergensesteenweg fase 6",
+                    "description": "Periode van vrijdag 9 mei 2025 ...",
+                    "start": "2025-05-09T00:00:00",
+                    "end": None,
+                    "type": "storing",
                 },
                 ...
             ]
@@ -50,8 +59,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         api_client: DeLijnApiClient,
-        gtfs_manager: GtfsStaticManager,
-        stop_ids: set[str],
+        stops: list[dict],
         scan_interval: int,
     ) -> None:
         super().__init__(
@@ -61,173 +69,146 @@ class DeLijnCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=scan_interval),
         )
         self._api_client = api_client
-        self._gtfs_manager = gtfs_manager
-        self.stop_ids = stop_ids  # mutable — updated when stops are added/removed
+        self.stops = stops  # mutable — updated when stops are added/removed
 
     async def _async_update_data(self) -> dict:
-        """Fetch RT feeds and build per-stop departure and alert data."""
+        """Fetch real-time data for all configured stops in parallel."""
+        tasks = {
+            stop["key"]: self._fetch_stop_data(stop)
+            for stop in self.stops
+        }
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+        data = {}
+        for stop_key, result in zip(tasks.keys(), results):
+            if isinstance(result, Exception):
+                _LOGGER.warning("Failed to fetch data for stop %s: %s", stop_key, result)
+                data[stop_key] = {"departures": [], "alerts": []}
+            else:
+                data[stop_key] = result
+
+        return data
+
+    async def _fetch_stop_data(self, stop: dict) -> dict:
+        """Fetch departures and alerts for a single stop."""
+        entity = stop["entiteitnummer"]
+        number = stop["haltenummer"]
+
         try:
-            trip_feed, alert_feed = await asyncio.gather(
-                self._api_client.fetch_trip_updates(),
-                self._api_client.fetch_alerts(),
+            realtime_data, disruption_data = await asyncio.gather(
+                self._api_client.fetch_realtime(entity, number, MAX_DEPARTURES),
+                self._api_client.fetch_disruptions(entity, number),
             )
         except DeLijnApiError as err:
-            raise UpdateFailed(f"De Lijn API error: {err}") from err
+            raise UpdateFailed(f"API error for stop {stop['key']}: {err}") from err
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Connection error: {err}") from err
 
-        now = datetime.now(timezone.utc).timestamp()
-        result = {}
-
-        for stop_id in self.stop_ids:
-            result[stop_id] = {
-                "departures": self._extract_departures(trip_feed, stop_id, now),
-                "alerts": self._extract_alerts(alert_feed, stop_id, now),
-            }
-
-        return result
+        return {
+            "departures": self._parse_departures(realtime_data),
+            "alerts": self._parse_alerts(disruption_data),
+        }
 
     # ------------------------------------------------------------------
-    # Departure extraction
+    # Departures
     # ------------------------------------------------------------------
 
-    def _extract_departures(self, feed: dict, stop_id: str, now: float) -> list[dict]:
-        """Find all upcoming departures at stop_id from the RT trip-update feed."""
+    def _parse_departures(self, data: dict) -> list[dict]:
+        """Extract and sort upcoming departures from real-time API response."""
         departures = []
+        now = datetime.now(timezone.utc)
 
-        for entity in feed.get("entity", []):
-            trip_update = entity.get("tripUpdate", {})
-            trip = trip_update.get("trip", {})
-            trip_id = trip.get("tripId", "")
+        for halte_doorkomst in data.get("halteDoorkomsten", []):
+            for doorkomst in halte_doorkomst.get("doorkomsten", []):
+                statuses = doorkomst.get("predictionStatussen") or []
+                if isinstance(statuses, str):
+                    statuses = [statuses]
 
-            for stop_update in trip_update.get("stopTimeUpdate", []):
-                if stop_update.get("stopId") != stop_id:
+                # Skip already-passed and cancelled departures
+                if PREDICTION_PASSED in statuses:
                     continue
 
-                # Skip stops the vehicle will not serve
-                if stop_update.get("scheduleRelationship") == SCHEDULE_RELATIONSHIP_SKIPPED:
-                    break
+                cancelled = (
+                    doorkomst.get("status") == "CANCELLED"
+                    or PREDICTION_CANCELLED in statuses
+                )
 
-                dep_time = _parse_timestamp(stop_update.get("departure", {}).get("time"))
-                if dep_time is None or dep_time < now:
-                    break  # Departure already passed or no data for this stop
+                scheduled_str = doorkomst.get("dienstregelingTijdstip")
+                realtime_str = doorkomst.get("real-timeTijdstip")
 
-                delay_seconds = stop_update.get("departure", {}).get("delay") or 0
-                trip_info = self._gtfs_manager.get_trip_info(trip_id) or {}
-                line = trip_info.get("route_short_name") or _parse_line_from_trip_id(trip_id)
+                scheduled_dt = _parse_datetime(scheduled_str)
+                realtime_dt = _parse_datetime(realtime_str)
 
-                # Skip trips we cannot identify at all
-                if not line:
-                    break
+                # Skip if scheduled time is in the past (and no RT override)
+                effective_dt = realtime_dt or scheduled_dt
+                if effective_dt and effective_dt < now and not cancelled:
+                    continue
+
+                delay_minutes = None
+                if scheduled_dt and realtime_dt:
+                    delta = realtime_dt - scheduled_dt
+                    delay_minutes = round(delta.total_seconds() / 60, 1)
 
                 departures.append({
-                    "trip_id": trip_id,
-                    "line": line,
-                    "headsign": trip_info.get("headsign", ""),
-                    "direction_id": trip_info.get("direction_id", 0),
-                    "route_id": trip_info.get("route_id", ""),
-                    "departure_time": dep_time,
-                    "delay_seconds": int(delay_seconds),
-                    "vehicle_id": trip_update.get("vehicle", {}).get("id", ""),
-                    "schedule_relationship": stop_update.get("scheduleRelationship", 0),
+                    "line": str(doorkomst.get("lijnnummer") or ""),
+                    "direction": doorkomst.get("richting") or "",
+                    "destination": (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip(),
+                    "destination_fr": (doorkomst.get("bestemmingKortFrans") or "").strip(),
+                    "scheduled": scheduled_str,
+                    "realtime": realtime_str if realtime_str else None,
+                    "delay_minutes": delay_minutes,
+                    "vehicle_id": doorkomst.get("vrtnum") or "",
+                    "prediction": statuses[0] if statuses else "",
+                    "cancelled": cancelled,
                 })
-                break  # Only one stopTimeUpdate entry per trip per stop
 
-        departures.sort(key=lambda d: d["departure_time"])
-        return departures[:MAX_UPCOMING_DEPARTURES * 5]  # Keep a generous buffer for sensors
+        # Sort by effective departure time
+        departures.sort(key=lambda d: d.get("realtime") or d.get("scheduled") or "")
+        return departures[:MAX_DEPARTURES]
 
     # ------------------------------------------------------------------
-    # Alert extraction
+    # Alerts
     # ------------------------------------------------------------------
 
-    def _extract_alerts(self, feed: dict, stop_id: str, now: float) -> list[dict]:
-        """Find active alerts for a specific stop_id.
+    def _parse_alerts(self, data: dict) -> list[dict]:
+        """Extract active disruptions and diversions."""
+        alerts = []
 
-        De Lijn's alert feed always includes a stopId in every informedEntity,
-        so we filter directly by stop_id — no route lookup needed.
-        """
-        active_alerts = []
+        for alert_type, items in [("storing", data.get("storingen") or []), ("omleiding", data.get("omleidingen") or [])]:
+            if not isinstance(items, list):
+                items = [items] if items else []
+            for item in items:
+                if not item or not item.get("titel"):
+                    continue
+                periode = item.get("periode") or {}
+                affected_lines = [
+                    lr.get("lijnNummerPubliek")
+                    for lr in (item.get("lijnrichtingen") or [])
+                    if lr.get("lijnNummerPubliek")
+                ]
+                alerts.append({
+                    "title": item.get("titel") or "",
+                    "description": item.get("omschrijving") or "",
+                    "start": periode.get("startDatum"),
+                    "end": periode.get("eindDatum") or None,
+                    "type": alert_type,
+                    "lines": affected_lines,
+                })
 
-        for entity in feed.get("entity", []):
-            alert = entity.get("alert", {})
-            active_periods = alert.get("activePeriod", [])
-
-            if active_periods and not _is_alert_active(active_periods, now):
-                continue
-
-            informed = alert.get("informedEntity", [])
-            if not any(e.get("stopId") == stop_id for e in informed):
-                continue
-
-            end_ts = _parse_timestamp(active_periods[0].get("end")) if active_periods else None
-            active_alerts.append({
-                "header": _get_translation(alert.get("headerText")),
-                "description": _get_translation(alert.get("descriptionText")),
-                "url": _get_translation(alert.get("url")),
-                "cause": alert.get("cause", 0),
-                "effect": alert.get("effect", 0),
-                "active_from": _parse_timestamp(active_periods[0].get("start")) if active_periods else None,
-                "active_until": end_ts if end_ts else None,
-            })
-
-        return active_alerts
+        return alerts
 
 
-
-# ------------------------------------------------------------------
-# Utility functions
-# ------------------------------------------------------------------
-
-def _parse_timestamp(value) -> float | None:
-    """Parse a GTFS-RT timestamp.
-
-    The API returns timestamps as either a plain integer or a protobuf-style
-    object { "low": int, "high": int, "unsigned": bool } due to int64 encoding.
-    """
-    if value is None:
+def _parse_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO datetime string from the De Lijn API into a UTC-aware datetime."""
+    if not value:
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, dict):
-        low = value.get("low", 0) or 0
-        high = value.get("high", 0) or 0
-        return float(low + (high << 32))
-    return None
-
-
-def _is_alert_active(active_periods: list, now: float) -> bool:
-    for period in active_periods:
-        start = _parse_timestamp(period.get("start")) or 0
-        end = _parse_timestamp(period.get("end"))
-        if start <= now and (end is None or now <= end):
-            return True
-    return False
-
-
-
-
-def _parse_line_from_trip_id(trip_id: str) -> str:
-    """Extract the line number from a De Lijn trip_id as a fallback.
-
-    trip_id format: gt:delijn:{time}_{line}_{sequence}_...
-    Example: gt:delijn:2597_90_91_... → "90"
-    """
     try:
-        parts = trip_id.split(":")[-1].split("_")
-        if len(parts) >= 2 and parts[1].isdigit():
-            return parts[1]
-    except Exception:
-        pass
-    return ""
-
-
-def _get_translation(text_obj: dict | None, lang: str = "en") -> str:
-    """Extract a translated string from a GTFS-RT TranslatedString object."""
-    if not text_obj:
-        return ""
-    for translation in text_obj.get("translation", []):
-        if translation.get("language") == lang:
-            return translation.get("text", "")
-    # Fallback to first available translation
-    translations = text_obj.get("translation", [])
-    return translations[0].get("text", "") if translations else ""
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            # De Lijn times are Europe/Brussels — treat as local and convert
+            import zoneinfo
+            brussels = zoneinfo.ZoneInfo("Europe/Brussels")
+            dt = dt.replace(tzinfo=brussels)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None

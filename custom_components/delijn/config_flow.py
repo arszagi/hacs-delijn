@@ -11,40 +11,39 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import DeLijnApiClient
 from .const import (
+    CLASSIFICATIE_FLEX,
+    CLASSIFICATIE_TIJDELIJK,
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
-    CONF_STOP_IDS,
+    CONF_STOPS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MIN_SCAN_INTERVAL,
 )
-from .gtfs_static import GtfsStaticManager
+from .stop_cache import StopCache
 
 _LOGGER = logging.getLogger(__name__)
 
-# Maximum number of stop results shown to the user during search
-_MAX_SEARCH_RESULTS = 20
-
 
 class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Multi-step config flow: API key → GTFS download → stop search → confirm."""
+    """Multi-step config flow: API key → load stops → search → confirm."""
 
     VERSION = 1
 
     def __init__(self) -> None:
         self._api_key: str = ""
         self._scan_interval: int = DEFAULT_SCAN_INTERVAL
-        self._selected_groups: dict[str, list[str]] = {}   # display_name → [stop_ids]
-        self._search_results: dict[str, dict] = {}          # display_name → group dict
-        self._gtfs_manager: GtfsStaticManager | None = None
+        self._selected_stops: list[dict] = []
+        self._search_results: dict[str, dict] = {}  # display_name → group dict
+        self._pending_stop: dict | None = None       # stop being confirmed
+        self._stop_cache: StopCache | None = None
 
     # ------------------------------------------------------------------
-    # Step 1 — API key + scan interval
+    # Step 1 — API key + interval
     # ------------------------------------------------------------------
 
     async def async_step_user(self, user_input: dict | None = None):
         errors = {}
-
         if user_input is not None:
             api_key = user_input[CONF_API_KEY].strip()
             scan_interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -59,8 +58,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     self._api_key = api_key
                     self._scan_interval = scan_interval
-                    # Download GTFS data (shows loading spinner in UI)
-                    return await self._async_init_gtfs_and_step_add_stop()
+                    return await self._init_cache_and_search()
 
         return self.async_show_form(
             step_id="user",
@@ -73,37 +71,36 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # ------------------------------------------------------------------
-    # Step 2 — Download GTFS then search for a stop
-    # ------------------------------------------------------------------
-
-    async def _async_init_gtfs_and_step_add_stop(self):
-        """Download GTFS static data (if needed) and proceed to stop search."""
+    async def _init_cache_and_search(self):
+        """Download stop cache then go to stop search."""
         session = async_get_clientsession(self.hass)
         api_client = DeLijnApiClient(self._api_key, session)
-        self._gtfs_manager = GtfsStaticManager(self.hass, api_client)
+        self._stop_cache = StopCache(self.hass, api_client)
         try:
-            await self._gtfs_manager.initialize()
+            await self._stop_cache.initialize()
         except Exception as err:
-            _LOGGER.error("GTFS download failed during config flow: %s", err)
-            return self.async_abort(reason="gtfs_download_failed")
+            _LOGGER.error("Stop cache init failed: %s", err)
+            return self.async_abort(reason="cache_download_failed")
         return await self.async_step_add_stop()
+
+    # ------------------------------------------------------------------
+    # Step 2 — Search
+    # ------------------------------------------------------------------
 
     async def async_step_add_stop(self, user_input: dict | None = None):
         errors = {}
-
         if user_input is not None:
             query = user_input.get("stop_search", "").strip()
             if len(query) < 2:
                 errors["stop_search"] = "query_too_short"
             else:
-                results = self._gtfs_manager.search_stops(query)[:_MAX_SEARCH_RESULTS]
+                results = self._stop_cache.search(query)
                 if not results:
                     errors["stop_search"] = "no_stops_found"
                 else:
                     self._search_results = {r["display_name"]: r for r in results}
                     if len(results) == 1:
-                        return await self._add_group_and_confirm(results[0])
+                        return await self._confirm_group(results[0])
                     return await self.async_step_select_stop()
 
         return self.async_show_form(
@@ -113,33 +110,60 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
-    # Step 3 — Select stop from search results
+    # Step 3 — Select from results
     # ------------------------------------------------------------------
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
-            if user_input["stop_id"] == "__back__":
+            key = user_input["stop_key"]
+            if key == "__back__":
                 return await self.async_step_add_stop()
-            group = self._search_results[user_input["stop_id"]]
-            return await self._add_group_and_confirm(group)
+            return await self._confirm_group(self._search_results[key])
 
         options = {"__back__": "← Search again"} | {
-            display_name: display_name for display_name in self._search_results
+            name: name for name in self._search_results
         }
         return self.async_show_form(
             step_id="select_stop",
-            data_schema=vol.Schema({
-                vol.Required("stop_id"): vol.In(options)
-            }),
+            data_schema=vol.Schema({vol.Required("stop_key"): vol.In(options)}),
         )
 
     # ------------------------------------------------------------------
-    # Step 4 — Confirm stops + add more or finish
+    # Step 4 — Confirm (with warnings for TIJDELIJK / FLEX / non-served)
     # ------------------------------------------------------------------
 
-    async def _add_group_and_confirm(self, group: dict):
-        self._selected_groups[group["display_name"]] = group["stop_ids"]
-        return await self.async_step_confirm_stops()
+    async def _confirm_group(self, group: dict):
+        """Build warning message and ask for confirmation."""
+        self._pending_stop = group
+        warning = await _build_stop_warning(group, self._stop_cache)
+        return await self.async_step_confirm_stop(warning=warning)
+
+    async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "cancel":
+                return await self.async_step_add_stop()
+            # Add all stop keys from this group
+            for key in self._pending_stop["stop_keys"]:
+                stop_info = self._stop_cache.get_stop(key)
+                if stop_info and not any(s["key"] == key for s in self._selected_stops):
+                    self._selected_stops.append(stop_info)
+            return await self.async_step_confirm_stops()
+
+        return self.async_show_form(
+            step_id="confirm_stop",
+            data_schema=vol.Schema({
+                vol.Required("action", default="add"): vol.In({
+                    "add": "Add this stop",
+                    "cancel": "Search again",
+                })
+            }),
+            description_placeholders={"warning": warning},
+        )
+
+    # ------------------------------------------------------------------
+    # Step 5 — Summary + add more / finish
+    # ------------------------------------------------------------------
 
     async def async_step_confirm_stops(self, user_input: dict | None = None):
         if user_input is not None:
@@ -148,7 +172,9 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_add_stop()
             return self._create_entry()
 
-        stops_summary = "\n".join(f"• {name}" for name in self._selected_groups)
+        stops_summary = "\n".join(
+            f"• {s['name']} ({s['classificatie']})" for s in self._selected_stops
+        )
         return self.async_show_form(
             step_id="confirm_stops",
             data_schema=vol.Schema({
@@ -161,18 +187,12 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _create_entry(self):
-        # Flatten all group stop_ids into a single deduplicated list
-        all_stop_ids = list({
-            sid
-            for ids in self._selected_groups.values()
-            for sid in ids
-        })
         return self.async_create_entry(
             title="De Lijn",
             data={
                 CONF_API_KEY: self._api_key,
                 CONF_SCAN_INTERVAL: self._scan_interval,
-                CONF_STOP_IDS: all_stop_ids,
+                CONF_STOPS: self._selected_stops,
             },
         )
 
@@ -183,16 +203,16 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 # ------------------------------------------------------------------
-# Options flow — post-installation management
+# Options flow
 # ------------------------------------------------------------------
 
 class DeLijnOptionsFlow(OptionsFlow):
-    """Allows the user to manage stops, API key and refresh interval after setup."""
+    """Post-installation management: add/remove stops, change settings."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._search_results: dict[str, dict] = {}   # display_name → group dict
-        self._gtfs_manager: GtfsStaticManager | None = None
+        self._search_results: dict[str, dict] = {}
+        self._pending_stop: dict | None = None
 
     async def async_step_init(self, user_input: dict | None = None):
         return self.async_show_menu(
@@ -202,30 +222,26 @@ class DeLijnOptionsFlow(OptionsFlow):
                 "remove_stop": "Remove a stop",
                 "change_api_key": "Change API key",
                 "change_interval": "Change refresh interval",
-                "force_gtfs_refresh": "Force schedule data refresh",
+                "force_cache_refresh": "Force stop data refresh",
             },
         )
 
-    # ------------------------------------------------------------------
     # Add stop
-    # ------------------------------------------------------------------
-
     async def async_step_add_stop(self, user_input: dict | None = None):
         errors = {}
-
         if user_input is not None:
             query = user_input.get("stop_search", "").strip()
             if len(query) < 2:
                 errors["stop_search"] = "query_too_short"
             else:
-                gtfs = await self._get_gtfs_manager()
-                results = gtfs.search_stops(query)[:_MAX_SEARCH_RESULTS]
+                cache = await self._get_cache()
+                results = cache.search(query)
                 if not results:
                     errors["stop_search"] = "no_stops_found"
                 else:
                     self._search_results = {r["display_name"]: r for r in results}
                     if len(results) == 1:
-                        return await self._save_new_group(results[0])
+                        return await self._confirm_group(results[0])
                     return await self.async_step_select_stop()
 
         return self.async_show_form(
@@ -236,78 +252,83 @@ class DeLijnOptionsFlow(OptionsFlow):
 
     async def async_step_select_stop(self, user_input: dict | None = None):
         if user_input is not None:
-            if user_input["stop_id"] == "__back__":
+            key = user_input["stop_key"]
+            if key == "__back__":
                 return await self.async_step_add_stop()
-            group = self._search_results[user_input["stop_id"]]
-            return await self._save_new_group(group)
+            return await self._confirm_group(self._search_results[key])
 
         options = {"__back__": "← Search again"} | {
             name: name for name in self._search_results
         }
         return self.async_show_form(
             step_id="select_stop",
-            data_schema=vol.Schema({
-                vol.Required("stop_id"): vol.In(options)
-            }),
+            data_schema=vol.Schema({vol.Required("stop_key"): vol.In(options)}),
         )
 
-    async def _save_new_group(self, group: dict):
-        current_stops = list(self._config_entry.data.get(CONF_STOP_IDS, []))
-        for stop_id in group["stop_ids"]:
-            if stop_id not in current_stops:
-                current_stops.append(stop_id)
-        return self._save_data({CONF_STOP_IDS: current_stops})
+    async def _confirm_group(self, group: dict):
+        self._pending_stop = group
+        cache = await self._get_cache()
+        warning = await _build_stop_warning(group, cache)
+        return await self.async_step_confirm_stop(warning=warning)
 
-    # ------------------------------------------------------------------
-    # Remove stop
-    # ------------------------------------------------------------------
-
-    async def async_step_remove_stop(self, user_input: dict | None = None):
-        current_stops = self._config_entry.data.get(CONF_STOP_IDS, [])
-
+    async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
         if user_input is not None:
-            stops_to_remove = set(user_input.get(CONF_STOP_IDS, []))
-            remaining = [s for s in current_stops if s not in stops_to_remove]
+            if user_input.get("action") == "cancel":
+                return await self.async_step_add_stop()
 
-            # Clean up entities from the registry for removed stops
+            cache = await self._get_cache()
+            current_stops = list(self._config_entry.data.get(CONF_STOPS, []))
+            for key in self._pending_stop["stop_keys"]:
+                stop_info = cache.get_stop(key)
+                if stop_info and not any(s["key"] == key for s in current_stops):
+                    current_stops.append(stop_info)
+            return self._save({CONF_STOPS: current_stops})
+
+        return self.async_show_form(
+            step_id="confirm_stop",
+            data_schema=vol.Schema({
+                vol.Required("action", default="add"): vol.In({
+                    "add": "Add this stop",
+                    "cancel": "Search again",
+                })
+            }),
+            description_placeholders={"warning": warning},
+        )
+
+    # Remove stop
+    async def async_step_remove_stop(self, user_input: dict | None = None):
+        current_stops = self._config_entry.data.get(CONF_STOPS, [])
+        if user_input is not None:
+            key_to_remove = user_input["stop_key"]
+            remaining = [s for s in current_stops if s["key"] != key_to_remove]
+
+            # Remove entities from registry
             registry = er.async_get(self.hass)
             for entity_entry in er.async_entries_for_config_entry(registry, self._config_entry.entry_id):
-                for removed_stop in stops_to_remove:
-                    # unique_id pattern: delijn_{stop_id}_{...}
-                    if f"_{removed_stop}_" in entity_entry.unique_id:
-                        registry.async_remove(entity_entry.entity_id)
-                        break
+                if f"_{key_to_remove}_" in entity_entry.unique_id or entity_entry.unique_id.endswith(f"_{key_to_remove}"):
+                    registry.async_remove(entity_entry.entity_id)
 
-            return self._save_data({CONF_STOP_IDS: remaining})
+            return self._save({CONF_STOPS: remaining})
 
-        gtfs = await self._get_gtfs_manager()
-        stop_options = {
-            stop_id: gtfs.get_stop_name(stop_id)
-            for stop_id in current_stops
-        }
+        stop_options = {s["key"]: f"{s['name']} ({s['haltenummer']})" for s in current_stops}
+        if not stop_options:
+            return self._save({})
 
         return self.async_show_form(
             step_id="remove_stop",
-            data_schema=vol.Schema({
-                vol.Required(CONF_STOP_IDS): vol.In(stop_options)
-            }),
+            data_schema=vol.Schema({vol.Required("stop_key"): vol.In(stop_options)}),
         )
 
-    # ------------------------------------------------------------------
     # Change API key
-    # ------------------------------------------------------------------
-
     async def async_step_change_api_key(self, user_input: dict | None = None):
         errors = {}
-
         if user_input is not None:
             api_key = user_input[CONF_API_KEY].strip()
             session = async_get_clientsession(self.hass)
-            client = DeLijnApiClient(api_key, session)
-            if not await client.validate_api_key():
+            if not await DeLijnApiClient(api_key, session).validate_api_key():
                 errors[CONF_API_KEY] = "invalid_api_key"
             else:
-                return self._save_data({CONF_API_KEY: api_key})
+                return self._save({CONF_API_KEY: api_key})
 
         return self.async_show_form(
             step_id="change_api_key",
@@ -315,19 +336,15 @@ class DeLijnOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    # ------------------------------------------------------------------
-    # Change scan interval
-    # ------------------------------------------------------------------
-
+    # Change interval
     async def async_step_change_interval(self, user_input: dict | None = None):
         errors = {}
-
         if user_input is not None:
             interval = user_input[CONF_SCAN_INTERVAL]
             if interval < MIN_SCAN_INTERVAL:
                 errors[CONF_SCAN_INTERVAL] = "interval_too_low"
             else:
-                return self._save_data({CONF_SCAN_INTERVAL: interval})
+                return self._save({CONF_SCAN_INTERVAL: interval})
 
         current = self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         return self.async_show_form(
@@ -340,46 +357,65 @@ class DeLijnOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    # ------------------------------------------------------------------
-    # Force GTFS refresh
-    # ------------------------------------------------------------------
-
-    async def async_step_force_gtfs_refresh(self, user_input: dict | None = None):
+    # Force cache refresh
+    async def async_step_force_cache_refresh(self, user_input: dict | None = None):
         if user_input is not None:
             if user_input.get("confirm"):
                 entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {})
-                gtfs = entry_data.get("gtfs_manager")
-                if gtfs:
+                cache = entry_data.get("stop_cache")
+                if cache:
                     try:
-                        await gtfs.force_refresh()
+                        await cache.force_refresh()
                     except Exception as err:
-                        _LOGGER.error("Force GTFS refresh failed: %s", err)
+                        _LOGGER.error("Cache refresh failed: %s", err)
             return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
-            step_id="force_gtfs_refresh",
+            step_id="force_cache_refresh",
             data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
         )
 
-    # ------------------------------------------------------------------
     # Helpers
-    # ------------------------------------------------------------------
-
-    async def _get_gtfs_manager(self) -> GtfsStaticManager:
-        """Return the live GtfsStaticManager if available, or create a temporary one."""
+    async def _get_cache(self) -> StopCache:
         entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {})
-        if "gtfs_manager" in entry_data:
-            return entry_data["gtfs_manager"]
-
-        # Fallback: create a temporary manager using the stored API key
+        if "stop_cache" in entry_data:
+            return entry_data["stop_cache"]
         session = async_get_clientsession(self.hass)
         api_client = DeLijnApiClient(self._config_entry.data[CONF_API_KEY], session)
-        manager = GtfsStaticManager(self.hass, api_client)
-        await manager.initialize()
-        return manager
+        cache = StopCache(self.hass, api_client)
+        await cache.initialize()
+        return cache
 
-    def _save_data(self, updates: dict):
-        """Merge updates into config entry data and close the options flow."""
+    def _save(self, updates: dict):
         new_data = {**self._config_entry.data, **updates}
         self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
         return self.async_create_entry(title="", data={})
+
+
+# ------------------------------------------------------------------
+# Shared warning builder
+# ------------------------------------------------------------------
+
+async def _build_stop_warning(group: dict, cache: StopCache) -> str:
+    """Build a warning string for the confirm step based on stop classification."""
+    warnings = []
+
+    for key in group["stop_keys"]:
+        stop = cache.get_stop(key)
+        if not stop:
+            continue
+
+        classificatie = stop.get("classificatie", "")
+
+        if classificatie == CLASSIFICATIE_TIJDELIJK:
+            warnings.append(
+                f"⚠️ Stop {stop['haltenummer']} ({stop['name']}) is a **temporary stop** "
+                f"(TIJDELIJK). It may be subject to changes or removal."
+            )
+        elif classificatie == CLASSIFICATIE_FLEX:
+            warnings.append(
+                f"ℹ️ Stop {stop['haltenummer']} is a **on-demand stop** (FLEX/Belbus). "
+                f"Departures are by reservation only — real-time data may be unavailable."
+            )
+
+    return "\n\n".join(warnings) + ("\n\n" if warnings else "")
