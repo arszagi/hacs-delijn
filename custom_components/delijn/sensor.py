@@ -151,14 +151,18 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Mark unavailable when no upcoming departure is in the RT feed."""
+        return self.coordinator.last_update_success and self._get_next_departure() is not None
+
+    @property
     def native_value(self) -> int | None:
-        """Minutes until the next departure, or None when no service."""
+        """Minutes until the next departure."""
         next_dep = self._get_next_departure()
         if next_dep is None:
             return None
         now = datetime.now(timezone.utc).timestamp()
-        minutes = max(0, int((next_dep["departure_time"] - now) / 60))
-        return minutes
+        return max(0, int((next_dep["departure_time"] - now) / 60))
 
     @property
     def extra_state_attributes(self) -> dict:

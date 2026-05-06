@@ -114,10 +114,15 @@ class DeLijnCoordinator(DataUpdateCoordinator):
 
                 delay_seconds = stop_update.get("departure", {}).get("delay") or 0
                 trip_info = self._gtfs_manager.get_trip_info(trip_id) or {}
+                line = trip_info.get("route_short_name") or _parse_line_from_trip_id(trip_id)
+
+                # Skip trips we cannot identify at all
+                if not line:
+                    break
 
                 departures.append({
                     "trip_id": trip_id,
-                    "line": trip_info.get("route_short_name") or "?",
+                    "line": line,
                     "headsign": trip_info.get("headsign", ""),
                     "direction_id": trip_info.get("direction_id", 0),
                     "route_id": trip_info.get("route_id", ""),
@@ -199,6 +204,21 @@ def _is_alert_active(active_periods: list, now: float) -> bool:
     return False
 
 
+
+
+def _parse_line_from_trip_id(trip_id: str) -> str:
+    """Extract the line number from a De Lijn trip_id as a fallback.
+
+    trip_id format: gt:delijn:{time}_{line}_{sequence}_...
+    Example: gt:delijn:2597_90_91_... → "90"
+    """
+    try:
+        parts = trip_id.split(":")[-1].split("_")
+        if len(parts) >= 2 and parts[1].isdigit():
+            return parts[1]
+    except Exception:
+        pass
+    return ""
 
 
 def _get_translation(text_obj: dict | None, lang: str = "en") -> str:

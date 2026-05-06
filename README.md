@@ -7,7 +7,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
+[![Version](https://img.shields.io/badge/version-0.0.8-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
 
 A Home Assistant custom integration for **De Lijn** — the public transport operator for buses and trams in Flanders, Belgium.
 
