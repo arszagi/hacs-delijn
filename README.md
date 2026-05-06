@@ -1,27 +1,25 @@
 # De Lijn — Home Assistant Integration
 
-> [!WARNING]
-> **This integration is currently in active development and is not ready for use.**
-> Functionality may be incomplete, unstable or subject to breaking changes at any time.
-> Do not use in a production Home Assistant environment.
-
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/arszagi/hacs-delijn/releases)
 
 A Home Assistant custom integration for **De Lijn** — the public transport operator for buses and trams in Flanders, Belgium.
 
-Provides real-time departure times, delays and service alerts for any De Lijn stop, directly in your Home Assistant dashboard.
+Provides real-time departure times, delays, service alerts and line badge colors for any De Lijn stop, directly in your Home Assistant dashboard.
 
 ---
 
 ## Features
 
-- **Real-time departures** — live arrival/departure times with delays from the GTFS-RT feed
+- **Real-time departures** — live times and delays via the De Lijn V1 Core API
+- **Scheduled times** — always shown even when no real-time data is available
 - **Per-line sensors** — one sensor per bus/tram line per stop, grouped by stop as a HA device
-- **Service alerts** — active disruptions, cancellations and diversions per stop
+- **Line badge colors** — background, text, border and text-border colors for each line (for custom Lovelace cards)
+- **Bilingual destinations** — display stop destinations in Dutch or French
+- **Service alerts** — active disruptions and diversions per stop
+- **Temporary stop detection** — warns during installation if a stop is temporary (TIJDELIJK) or on-demand (FLEX)
 - **Multi-stop support** — monitor as many stops as you need
-- **Smart GTFS caching** — schedule data downloaded once, refreshed only when changed
 - **Configurable refresh interval** — default 30 seconds, minimum 30 seconds
 - **Full options flow** — add/remove stops and change settings without reinstalling
 
@@ -30,15 +28,16 @@ Provides real-time departure times, delays and service alerts for any De Lijn st
 ## Requirements
 
 - Home Assistant **2024.4.0** or later
-- A free API key from the Belgian Mobility Open Data portal
+- A free API key from the De Lijn Open Data portal
 
 ### Getting your API key
 
-1. Go to [api-management-opendata-production.developer.azure-api.net](https://api-management-opendata-production.developer.azure-api.net)
+1. Go to [portal.delijn.be](https://portal.delijn.be)
 2. Log in or create a free account
-3. Go to your **Profile** page
-4. Subscribe to the **Standard** product
-5. Copy your primary or secondary key — you will need it during setup
+3. Go to **Products** and choose **Open Data Free — Subscribe Here**
+4. In **Your subscriptions**, enter a name of your choice (e.g. `HASSIO`) and click **Subscribe**
+5. Go to the **Profile** tab — you will find your **Primary key** and **Secondary key**
+6. Either key works — copy one and use it during setup
 
 ---
 
@@ -66,8 +65,9 @@ Provides real-time departure times, delays and service alerts for any De Lijn st
 2. Search for **De Lijn**
 3. Enter your API key
 4. Set the refresh interval (default: 30 seconds)
-5. Search for a stop (see below) and select it
-6. Add as many stops as needed, then finish
+5. Choose your display language: **Nederlands** or **Français**
+6. Search for a stop and select it
+7. Add as many stops as needed, then finish
 
 ### Searching for a stop
 
@@ -75,24 +75,35 @@ You can search either by **name** or by **stop number** — the behaviour differ
 
 | Search type | Example | Result |
 |---|---|---|
-| **By name** | `Clovis` | All platforms sharing that name are grouped into one entry — e.g. *Sint-Josse Clovis (2 platforms)*. Selecting it monitors all platforms at once. |
-| **By number** | `304660` | Only the specific platform with that number is returned. Useful when you want to monitor a single direction. |
+| **By name** | `E. Ghijsstraat` | All platforms sharing that name are grouped — e.g. *Sint-Pieters-Leeuw E. Ghijsstraat (304660, 304661, 354661)*. Selecting it monitors all platforms at once. |
+| **By number** | `304660` | Only that specific platform is returned — e.g. *Sint-Pieters-Leeuw E. Ghijsstraat (304660)*. Useful to monitor a single direction. |
 
 > Stop numbers are printed on the physical stop signs and on the De Lijn website.
+
+### Stop type warnings
+
+During installation, the integration warns you when a stop has a special classification:
+
+| Type | Meaning |
+|---|---|
+| `REGULIER` | Standard stop — no warning |
+| `TIJDELIJK` ⚠️ | Temporary stop — may be subject to changes or removal |
+| `FLEX` ℹ️ | On-demand stop (Belbus) — departures by reservation only |
 
 ### Options (post-installation)
 
 Click **Configure** on the integration card to:
 - Add or remove monitored stops
 - Change the API key
+- Change the display language (NL / FR)
 - Adjust the refresh interval
-- Force a schedule data refresh
+- Force a stop data refresh
 
 ---
 
 ## Entities
 
-For each configured stop, the integration creates a **device** grouping all related sensors.
+For each configured stop, the integration creates a **device** grouping all related sensors. The device model reflects the stop type (`Bus Stop`, `Temporary Stop`, `On-demand Stop`).
 
 ### Departure sensors
 
@@ -100,40 +111,53 @@ One sensor per bus/tram line and direction at the stop.
 
 | Attribute | Description |
 |---|---|
-| State | Minutes until next departure |
-| `line` | Line number (e.g. `R70`) |
-| `headsign` | Destination displayed on the vehicle |
-| `realtime_departure` | Real-time departure time (HH:MM) |
-| `delay_minutes` | Current delay in minutes (negative = early) |
-| `vehicle_id` | Internal vehicle identifier |
-| `next_departures` | List of upcoming departures with time and delay |
+| State | Minutes until next departure (unavailable = no service) |
+| `line` | Public line number (e.g. `R70`) |
+| `direction` | Direction (`HEEN` or `TERUG`) |
+| `destination` | Destination in the configured language |
+| `destination_fr` | Destination in French (always stored) |
+| `scheduled` | Scheduled departure time (HH:MM) |
+| `realtime` | Real-time departure time (HH:MM) when available |
+| `delay_minutes` | Delay in minutes (negative = early) |
+| `prediction` | `REALTIME`, `GEENREALTIME`, `GESCHRAPT` or `VERSTREKEN` |
+| `vehicle_id` | Vehicle number |
+| `next_departures` | List of upcoming departures (scheduled, realtime, delay, cancelled) |
+| `badge_background` | Badge background color hex (e.g. `#BBDD00`) |
+| `badge_text` | Badge text color hex (e.g. `#000000`) |
+| `badge_border` | Badge border color hex |
+| `badge_text_border` | Badge text outline color hex |
+| `stop_number` | Stop number (e.g. `354661`) |
+| `stop_type` | Stop classification (`REGULIER`, `TIJDELIJK`, `FLEX`) |
 
-**Example entity ID:** `sensor.delijn_line_r70_sint_pieters_leeuw_e_ghijsstraat_to_bruxelles_midi`
+**Example entity ID:** `sensor.delijn_line_r70_sint_pieters_leeuw_e_ghijsstraat_to_brussel_zuid`
 
 ### Alert sensor
 
-One sensor per stop showing active service disruptions.
+One sensor per stop showing active disruptions and diversions.
 
 | Attribute | Description |
 |---|---|
 | State | Number of active alerts |
-| `alerts` | List of alerts with header, description, URL and expiry time |
+| `alerts` | List of alerts with type, title, description, start/end date and affected lines |
+| `stop_type` | Stop classification |
 
-**Example entity ID:** `sensor.delijn_alerts_sint_pieters_leeuw_e_ghijsstraat`
+**Example entity ID:** `sensor.delijn_alerts_sint_pieters_leeuw_e_ghijsstraat_354661`
 
 ---
 
-## Data sources
+## Data source
 
-This integration uses the **Belgian Mobility Open Data** GTFS feeds:
+This integration uses the **De Lijn Open Data V1 Core API** (`api.delijn.be`):
 
-| Feed | Endpoint |
+| Endpoint | Used for |
 |---|---|
-| Static schedule | `/api/gtfs/feed/delijn/static/` |
-| Real-time trip updates | `/api/gtfs/feed/delijn/rt/trip-update/` |
-| Real-time alerts | `/api/gtfs/feed/delijn/rt/alert/` |
+| `/entiteiten/{id}/haltes` | Stop list download and search (cached locally) |
+| `/haltes/{e}/{h}/real-time` | Real-time departures per stop |
+| `/haltes/{e}/{h}/storingen` | Disruptions and diversions per stop |
+| `/lijnen/{e}/{lijn}/lijnkleuren` | Badge colors per line |
+| `/kleuren/{code}` | Color code to hex conversion |
 
-Schedule data (~200 MB) is downloaded once and cached locally. It is refreshed automatically when the remote file changes.
+Stop data (~30K stops, ~17 MB) is downloaded once at installation and cached locally. It can be refreshed manually from the integration options.
 
 ---
 
