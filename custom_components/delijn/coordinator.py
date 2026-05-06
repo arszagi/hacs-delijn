@@ -136,14 +136,11 @@ class DeLijnCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def _extract_alerts(self, feed: dict, stop_id: str, now: float) -> list[dict]:
-        """Find active alerts relevant to the routes serving stop_id.
+        """Find active alerts for a specific stop_id.
 
-        Two categories are included:
-        - Agency-wide alerts (no routeId in informedEntity) — always shown,
-          even when no buses are in the RT feed (e.g. full service outage).
-        - Route-specific alerts — shown only when the route serves this stop.
+        De Lijn's alert feed always includes a stopId in every informedEntity,
+        so we filter directly by stop_id — no route lookup needed.
         """
-        relevant_route_ids = self._get_route_ids_for_stop(stop_id)
         active_alerts = []
 
         for entity in feed.get("entity", []):
@@ -154,13 +151,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 continue
 
             informed = alert.get("informedEntity", [])
-            agency_wide = _is_agency_wide_alert(informed)
-
-            # Skip route-specific alerts when we don't know our routes yet
-            if not agency_wide and not relevant_route_ids:
-                continue
-
-            if not agency_wide and not _alert_affects_routes(informed, relevant_route_ids):
+            if not any(e.get("stopId") == stop_id for e in informed):
                 continue
 
             end_ts = _parse_timestamp(active_periods[0].get("end")) if active_periods else None
@@ -176,12 +167,6 @@ class DeLijnCoordinator(DataUpdateCoordinator):
 
         return active_alerts
 
-    def _get_route_ids_for_stop(self, stop_id: str) -> set[str]:
-        """Return route_ids currently serving stop_id based on coordinator data."""
-        if not self.data:
-            return set()
-        stop_data = self.data.get(stop_id, {})
-        return {dep["route_id"] for dep in stop_data.get("departures", []) if dep.get("route_id")}
 
 
 # ------------------------------------------------------------------
@@ -214,22 +199,6 @@ def _is_alert_active(active_periods: list, now: float) -> bool:
     return False
 
 
-def _is_agency_wide_alert(informed_entities: list) -> bool:
-    """Return True if the alert targets the whole agency with no specific route."""
-    for entity in informed_entities:
-        if entity.get("agencyId") and not entity.get("routeId"):
-            return True
-    return False
-
-
-def _alert_affects_routes(informed_entities: list, route_ids: set[str]) -> bool:
-    for entity in informed_entities:
-        if entity.get("routeId") in route_ids:
-            return True
-        trip_route = entity.get("trip", {}).get("routeId")
-        if trip_route and trip_route in route_ids:
-            return True
-    return False
 
 
 def _get_translation(text_obj: dict | None, lang: str = "en") -> str:

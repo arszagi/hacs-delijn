@@ -1,7 +1,7 @@
 """Constants for the De Lijn integration."""
 
 DOMAIN = "delijn"
-VERSION = "0.0.6"
+VERSION = "0.0.7"
 
 # API
 API_BASE_URL = "https://api-management-opendata-production.azure-api.net"
