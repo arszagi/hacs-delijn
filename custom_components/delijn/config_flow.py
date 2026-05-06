@@ -131,7 +131,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_add_stop()
             return await self._confirm_group(self._search_results[key])
 
-        options = {"__back__": "← Search again"} | {
+        options = {"__back__": _ui("back", self._language)} | {
             name: name for name in self._search_results
         }
         legend = _build_legend(self._search_results, self._language)
@@ -170,8 +170,8 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="confirm_stop",
             data_schema=vol.Schema({
                 vol.Required("action", default="add"): vol.In({
-                    "add": "Add this stop",
-                    "cancel": "Search again",
+                    "add": _ui("add_stop", self._language),
+                    "cancel": _ui("cancel", self._language),
                 })
             }),
             description_placeholders={
@@ -191,15 +191,13 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_add_stop()
             return self._create_entry()
 
-        stops_summary = "\n".join(
-            f"• {s['name']} ({s['classificatie']})" for s in self._selected_stops
-        )
+        stops_summary = _build_stops_summary(self._selected_stops, self._language)
         return self.async_show_form(
             step_id="confirm_stops",
             data_schema=vol.Schema({
                 vol.Required("action", default="finish"): vol.In({
-                    "add_another": "Add another stop",
-                    "finish": "Finish",
+                    "add_another": _ui("add_another", self._language),
+                    "finish": _ui("finish", self._language),
                 })
             }),
             description_placeholders={"stops": stops_summary},
@@ -278,10 +276,10 @@ class DeLijnOptionsFlow(OptionsFlow):
                 return await self.async_step_add_stop()
             return await self._confirm_group(self._search_results[key])
 
-        options = {"__back__": "← Search again"} | {
+        lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        options = {"__back__": _ui("back", lang)} | {
             name: name for name in self._search_results
         }
-        lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
         legend = _build_legend(self._search_results, lang)
         return self.async_show_form(
             step_id="select_stop",
@@ -301,6 +299,7 @@ class DeLijnOptionsFlow(OptionsFlow):
     async def async_step_confirm_stop(
         self, user_input: dict | None = None, display_name: str = "", warning: str = ""
     ):
+        lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
         if user_input is not None:
             if user_input.get("action") == "cancel":
                 return await self.async_step_add_stop()
@@ -317,8 +316,8 @@ class DeLijnOptionsFlow(OptionsFlow):
             step_id="confirm_stop",
             data_schema=vol.Schema({
                 vol.Required("action", default="add"): vol.In({
-                    "add": "Add this stop",
-                    "cancel": "Search again",
+                    "add": _ui("add_stop", lang),
+                    "cancel": _ui("cancel", lang),
                 })
             }),
             description_placeholders={
@@ -490,6 +489,75 @@ _WARNING_STRINGS = {
         "FLEX": "ℹ️ Halte **{num}** is een **Flexbus halte** (op aanvraag). Reservering vereist: bel **015 40 88 88** of gebruik de **De Lijn Flex** app. Geen realtimedata beschikbaar in Home Assistant.",
     },
 }
+
+
+_UI_STRINGS = {
+    "fr": {
+        "back":         "← Nouvelle recherche",
+        "add_stop":     "Ajouter cet arrêt",
+        "cancel":       "Nouvelle recherche",
+        "add_another":  "Ajouter un autre arrêt",
+        "finish":       "Terminer",
+        "yes_refresh":  "Oui, mettre à jour maintenant",
+    },
+    "nl": {
+        "back":         "← Opnieuw zoeken",
+        "add_stop":     "Halte toevoegen",
+        "cancel":       "Opnieuw zoeken",
+        "add_another":  "Nog een halte toevoegen",
+        "finish":       "Voltooien",
+        "yes_refresh":  "Ja, nu vernieuwen",
+    },
+    "en": {
+        "back":         "← Search again",
+        "add_stop":     "Add this stop",
+        "cancel":       "Search again",
+        "add_another":  "Add another stop",
+        "finish":       "Finish",
+        "yes_refresh":  "Yes, refresh now",
+    },
+}
+
+
+def _ui(key: str, language: str) -> str:
+    lang = "fr" if language == LANG_FR else "nl"
+    return _UI_STRINGS[lang][key]
+
+
+def _build_stops_summary(stops: list[dict], language: str = "nl") -> str:
+    """Build a grouped summary of selected stops for the confirm_stops screen.
+
+    Groups platforms sharing the same name into one line, shows platform numbers
+    with icons and the combined stop types — all translated to the selected language.
+    """
+    from .sensor import _translate_stop_type  # avoid circular import at module level
+
+    # Group by stop name
+    groups: dict[str, list[dict]] = {}
+    for s in stops:
+        groups.setdefault(s["name"], []).append(s)
+
+    lines = []
+    for name, group_stops in groups.items():
+        number_parts = []
+        seen_types: list[str] = []
+        for s in group_stops:
+            cls = s.get("classificatie", "REGULIER")
+            num = s["haltenummer"]
+            if cls == "TIJDELIJK":
+                number_parts.append(f"⚠️ {num}")
+            elif cls == "FLEX":
+                number_parts.append(f"ℹ️ {num}")
+            else:
+                number_parts.append(num)
+            if cls not in seen_types:
+                seen_types.append(cls)
+
+        numbers = ", ".join(number_parts)
+        types = " + ".join(_translate_stop_type(c, language) for c in seen_types)
+        lines.append(f"• {name} ({numbers}) — {types}")
+
+    return "\n".join(lines)
 
 
 def _build_legend(search_results: dict, language: str = "nl") -> str:
