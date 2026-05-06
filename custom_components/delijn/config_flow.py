@@ -14,10 +14,14 @@ from .const import (
     CLASSIFICATIE_FLEX,
     CLASSIFICATIE_TIJDELIJK,
     CONF_API_KEY,
+    CONF_LANGUAGE,
     CONF_SCAN_INTERVAL,
     CONF_STOPS,
+    DEFAULT_LANGUAGE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    LANG_FR,
+    LANG_NL,
     MIN_SCAN_INTERVAL,
 )
 from .stop_cache import StopCache
@@ -33,6 +37,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._api_key: str = ""
         self._scan_interval: int = DEFAULT_SCAN_INTERVAL
+        self._language: str = DEFAULT_LANGUAGE
         self._selected_stops: list[dict] = []
         self._search_results: dict[str, dict] = {}  # display_name → group dict
         self._pending_stop: dict | None = None       # stop being confirmed
@@ -58,6 +63,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     self._api_key = api_key
                     self._scan_interval = scan_interval
+                    self._language = user_input.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
                     return await self._init_cache_and_search()
 
         return self.async_show_form(
@@ -67,6 +73,10 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
                     int, vol.Range(min=MIN_SCAN_INTERVAL)
                 ),
+                vol.Required(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In({
+                    LANG_NL: "Nederlands",
+                    LANG_FR: "Français",
+                }),
             }),
             errors=errors,
         )
@@ -192,6 +202,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
             data={
                 CONF_API_KEY: self._api_key,
                 CONF_SCAN_INTERVAL: self._scan_interval,
+                CONF_LANGUAGE: self._language,
                 CONF_STOPS: self._selected_stops,
             },
         )
@@ -222,6 +233,7 @@ class DeLijnOptionsFlow(OptionsFlow):
                 "remove_stop": "Remove a stop",
                 "change_api_key": "Change API key",
                 "change_interval": "Change refresh interval",
+                "change_language": "Change display language",
                 "force_cache_refresh": "Force stop data refresh",
             },
         )
@@ -355,6 +367,22 @@ class DeLijnOptionsFlow(OptionsFlow):
                 )
             }),
             errors=errors,
+        )
+
+    # Change language
+    async def async_step_change_language(self, user_input: dict | None = None):
+        if user_input is not None:
+            return self._save({CONF_LANGUAGE: user_input[CONF_LANGUAGE]})
+
+        current = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        return self.async_show_form(
+            step_id="change_language",
+            data_schema=vol.Schema({
+                vol.Required(CONF_LANGUAGE, default=current): vol.In({
+                    LANG_NL: "Nederlands",
+                    LANG_FR: "Français",
+                }),
+            }),
         )
 
     # Force cache refresh

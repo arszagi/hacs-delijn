@@ -9,7 +9,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import DeLijnApiClient
-from .const import CONF_API_KEY, CONF_SCAN_INTERVAL, CONF_STOPS, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_API_KEY, CONF_LANGUAGE, CONF_SCAN_INTERVAL, CONF_STOPS, DEFAULT_LANGUAGE, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .coordinator import DeLijnCoordinator
 from .stop_cache import StopCache
 
@@ -23,6 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_key = entry.data[CONF_API_KEY]
     stops = entry.data.get(CONF_STOPS, [])
     scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    language = entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
 
     session = async_get_clientsession(hass)
     api_client = DeLijnApiClient(api_key, session)
@@ -34,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"Failed to load stop data: {err}") from err
 
     coordinator = DeLijnCoordinator(hass, api_client, stops, scan_interval)
+    coordinator.language = language
 
     try:
         await coordinator.async_config_entry_first_refresh()

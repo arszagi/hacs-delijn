@@ -10,7 +10,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api_client import DeLijnApiClient, DeLijnApiError
 from .const import (
+    CONF_LANGUAGE,
+    DEFAULT_LANGUAGE,
     DOMAIN,
+    LANG_FR,
     MAX_DEPARTURES,
     PREDICTION_CANCELLED,
     PREDICTION_PASSED,
@@ -70,6 +73,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         )
         self._api_client = api_client
         self.stops = stops  # mutable — updated when stops are added/removed
+        self.language = DEFAULT_LANGUAGE  # set after init from config entry
         # Cache: (entiteitnummer, lijnnummer) → public line number (e.g. "R70")
         self._public_line_cache: dict[tuple, str] = {}
 
@@ -154,11 +158,17 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 internal_num = str(doorkomst.get("lijnnummer") or "")
                 public_num = await self._resolve_public_line(entiteitnummer, internal_num)
 
+                dest_nl = (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip()
+                dest_fr = (doorkomst.get("bestemmingKortFrans") or "").strip()
+                # Use French destination if language is FR and French name is available
+                display_dest = (dest_fr if self.language == LANG_FR and dest_fr else dest_nl)
+
                 departures.append({
                     "line": public_num or internal_num,
                     "direction": doorkomst.get("richting") or "",
-                    "destination": (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip(),
-                    "destination_fr": (doorkomst.get("bestemmingKortFrans") or "").strip(),
+                    "destination": display_dest,
+                    "destination_nl": dest_nl,
+                    "destination_fr": dest_fr,
                     "scheduled": scheduled_str,
                     "realtime": realtime_str if realtime_str else None,
                     "delay_minutes": delay_minutes,

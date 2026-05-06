@@ -12,6 +12,12 @@ API_ENTITIES = [1, 2, 3, 4, 5]  # Antwerpen, Oost-Vl, Vlaams-Brabant, Limburg, W
 CONF_API_KEY = "api_key"
 CONF_STOPS = "stops"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_LANGUAGE = "language"
+
+# Languages
+LANG_NL = "nl"
+LANG_FR = "fr"
+DEFAULT_LANGUAGE = LANG_NL
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 30

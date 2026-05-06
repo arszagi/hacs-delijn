@@ -6,7 +6,8 @@
         "description": "Enter your De Lijn Open Data API key.",
         "data": {
           "api_key": "API Key",
-          "scan_interval": "Refresh interval (seconds, min. 30)"
+          "scan_interval": "Refresh interval (seconds, min. 30)",
+          "language": "Display language for destinations"
         }
       },
       "add_stop": {
@@ -101,6 +102,12 @@
         "title": "Change refresh interval",
         "data": {
           "scan_interval": "Refresh interval (seconds, min. 30)"
+        }
+      },
+      "change_language": {
+        "title": "Change display language",
+        "data": {
+          "language": "Language for destination names"
         }
       },
       "force_cache_refresh": {

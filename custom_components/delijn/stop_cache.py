@@ -71,13 +71,12 @@ class StopCache:
 
         results = []
         for name, keys in groups.items():
-            count = len(keys)
-            # Flag if any platform in the group is temporary
             any_tijdelijk = any(
                 self._stops[k]["classificatie"] == "TIJDELIJK" for k in keys
             )
-            suffix = f" ({count} platforms)" if count > 1 else ""
-            display = f"{name}{suffix}"
+            # Always show stop numbers so the user knows exactly which platforms are grouped
+            numbers = ", ".join(self._stops[k]["haltenummer"] for k in keys)
+            display = f"{name} ({numbers})"
 
             results.append({
                 "name": name,
