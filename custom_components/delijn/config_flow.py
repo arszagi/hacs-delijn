@@ -134,9 +134,11 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
         options = {"__back__": "← Search again"} | {
             name: name for name in self._search_results
         }
+        legend = _build_legend(self._search_results, self._language)
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({vol.Required("stop_key"): vol.In(options)}),
+            description_placeholders={"legend": legend},
         )
 
     # ------------------------------------------------------------------
@@ -146,7 +148,7 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _confirm_group(self, group: dict):
         """Build warning message and ask for confirmation."""
         self._pending_stop = group
-        warning = await _build_stop_warning(group, self._stop_cache)
+        warning = await _build_stop_warning(group, self._stop_cache, self._language)
         return await self.async_step_confirm_stop(warning=warning)
 
     async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
@@ -273,15 +275,19 @@ class DeLijnOptionsFlow(OptionsFlow):
         options = {"__back__": "← Search again"} | {
             name: name for name in self._search_results
         }
+        lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        legend = _build_legend(self._search_results, lang)
         return self.async_show_form(
             step_id="select_stop",
             data_schema=vol.Schema({vol.Required("stop_key"): vol.In(options)}),
+            description_placeholders={"legend": legend},
         )
 
     async def _confirm_group(self, group: dict):
         self._pending_stop = group
         cache = await self._get_cache()
-        warning = await _build_stop_warning(group, cache)
+        lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        warning = await _build_stop_warning(group, cache, lang)
         return await self.async_step_confirm_stop(warning=warning)
 
     async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
@@ -450,27 +456,59 @@ def _slug(text: str) -> str:
 # Shared warning builder
 # ------------------------------------------------------------------
 
-async def _build_stop_warning(group: dict, cache: StopCache) -> str:
+_LEGEND_STRINGS = {
+    "fr": {
+        "TIJDELIJK": "⚠️ Arrêt temporaire — peut être supprimé à la fin des travaux",
+        "FLEX": "ℹ️ Arrêt Flexbus — réservation requise (015 40 88 88 ou app De Lijn Flex)",
+    },
+    "nl": {
+        "TIJDELIJK": "⚠️ Tijdelijke halte — kan worden verwijderd na de werken",
+        "FLEX": "ℹ️ Flexbus halte — reservering vereist (015 40 88 88 of De Lijn Flex app)",
+    },
+}
+
+_WARNING_STRINGS = {
+    "fr": {
+        "TIJDELIJK": "⚠️ L'arrêt **{num}** ({name}) est un **arrêt temporaire**. Il peut disparaître ou ne pas avoir de données temps réel fiables.",
+        "FLEX": "ℹ️ L'arrêt **{num}** est un **arrêt Flexbus** (à la demande). Réservation requise : appelez le **015 40 88 88** ou utilisez l'app **De Lijn Flex**. Aucune donnée temps réel disponible dans Home Assistant.",
+    },
+    "nl": {
+        "TIJDELIJK": "⚠️ Halte **{num}** ({name}) is een **tijdelijke halte**. Deze kan verdwijnen of geen betrouwbare realtimedata hebben.",
+        "FLEX": "ℹ️ Halte **{num}** is een **Flexbus halte** (op aanvraag). Reservering vereist: bel **015 40 88 88** of gebruik de **De Lijn Flex** app. Geen realtimedata beschikbaar in Home Assistant.",
+    },
+}
+
+
+def _build_legend(search_results: dict, language: str = "nl") -> str:
+    """Build a legend explaining warning icons shown in search results."""
+    lang = "fr" if language == LANG_FR else "nl"
+    strings = _LEGEND_STRINGS[lang]
+    has_tijdelijk = any("TIJDELIJK" in r.get("warnings", []) for r in search_results.values())
+    has_flex = any("FLEX" in r.get("warnings", []) for r in search_results.values())
+    lines = []
+    if has_tijdelijk:
+        lines.append(strings["TIJDELIJK"])
+    if has_flex:
+        lines.append(strings["FLEX"])
+    return "\n".join(lines)
+
+
+async def _build_stop_warning(group: dict, cache: StopCache, language: str = "nl") -> str:
     """Build a warning string for the confirm step based on stop classification."""
+    lang = "fr" if language == LANG_FR else "nl"
+    strings = _WARNING_STRINGS[lang]
     warnings = []
 
     for key in group["stop_keys"]:
         stop = cache.get_stop(key)
         if not stop:
             continue
-
         classificatie = stop.get("classificatie", "")
-
         if classificatie == CLASSIFICATIE_TIJDELIJK:
-            warnings.append(
-                f"⚠️ Stop {stop['haltenummer']} ({stop['name']}) is a **temporary stop** "
-                f"(TIJDELIJK). It may be subject to changes or removal."
-            )
+            warnings.append(strings["TIJDELIJK"].format(
+                num=stop["haltenummer"], name=stop["name"]
+            ))
         elif classificatie == CLASSIFICATIE_FLEX:
-            warnings.append(
-                f"ℹ️ Stop {stop['haltenummer']} is a **Flexbus stop** (on-demand). "
-                f"Departures require a reservation: call **015 40 88 88** or use the **De Lijn Flex** app. "
-                f"Real-time data will not be available in Home Assistant."
-            )
+            warnings.append(strings["FLEX"].format(num=stop["haltenummer"]))
 
     return "\n\n".join(warnings) + ("\n\n" if warnings else "")

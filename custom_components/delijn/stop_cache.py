@@ -71,18 +71,33 @@ class StopCache:
 
         results = []
         for name, keys in groups.items():
-            any_tijdelijk = any(
-                self._stops[k]["classificatie"] == "TIJDELIJK" for k in keys
-            )
-            # Always show stop numbers so the user knows exactly which platforms are grouped
-            numbers = ", ".join(self._stops[k]["haltenummer"] for k in keys)
+            # Build number list with icons for special stop types
+            number_parts = []
+            warnings = []
+            for k in keys:
+                stop = self._stops[k]
+                cls = stop.get("classificatie", "REGULIER")
+                num = stop["haltenummer"]
+                if cls == "TIJDELIJK":
+                    number_parts.append(f"⚠️ {num}")
+                    if "TIJDELIJK" not in warnings:
+                        warnings.append("TIJDELIJK")
+                elif cls == "FLEX":
+                    number_parts.append(f"ℹ️ {num}")
+                    if "FLEX" not in warnings:
+                        warnings.append("FLEX")
+                else:
+                    number_parts.append(num)
+
+            numbers = ", ".join(number_parts)
             display = f"{name} ({numbers})"
 
             results.append({
                 "name": name,
                 "display_name": display,
                 "stop_keys": keys,
-                "any_tijdelijk": any_tijdelijk,
+                "any_tijdelijk": "TIJDELIJK" in warnings,
+                "warnings": warnings,  # list of special types present in this group
             })
 
         return results[:_MAX_SEARCH_RESULTS]

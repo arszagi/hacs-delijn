@@ -18,7 +18,7 @@
       },
       "select_stop": {
         "title": "Select a stop",
-        "description": "Select a stop, or choose **← Search again** to refine your search.",
+        "description": "Select a stop, or choose **← Search again** to refine your search.\n\n{legend}",
         "data": {
           "stop_key": "Stop"
         }
@@ -72,7 +72,7 @@
       },
       "select_stop": {
         "title": "Select a stop",
-        "description": "Select a stop, or choose **← Search again** to refine your search.",
+        "description": "Select a stop, or choose **← Search again** to refine your search.\n\n{legend}",
         "data": {
           "stop_key": "Stop"
         }

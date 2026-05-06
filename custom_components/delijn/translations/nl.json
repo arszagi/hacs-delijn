@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De Lijn — API-configuratie",
+        "description": "Voer uw De Lijn Open Data API-sleutel in.",
+        "data": {
+          "api_key": "API-sleutel",
+          "scan_interval": "Verversingsinterval (seconden, min. 30)",
+          "language": "Weergavetaal voor bestemmingen"
+        }
+      },
+      "add_stop": {
+        "title": "Halte zoeken",
+        "description": "Zoek op **naam** om alle perrons te groeperen, of op **haltenummer** (op het haltebord) voor één specifiek perron.",
+        "data": {
+          "stop_search": "Naam of haltenummer"
+        }
+      },
+      "select_stop": {
+        "title": "Halte selecteren",
+        "description": "Selecteer een halte, of kies **← Opnieuw zoeken** om uw zoekopdracht te verfijnen.\n\n{legend}",
+        "data": {
+          "stop_key": "Halte"
+        }
+      },
+      "confirm_stop": {
+        "title": "Halte bevestigen",
+        "description": "{warning}Deze halte toevoegen?",
+        "data": {
+          "action": "Actie"
+        }
+      },
+      "confirm_stops": {
+        "title": "Geconfigureerde haltes",
+        "description": "De volgende haltes worden bewaakt:\n{stops}",
+        "data": {
+          "action": "Actie"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Ongeldige API-sleutel of API niet bereikbaar.",
+      "no_stops_found": "Geen haltes gevonden voor uw zoekopdracht.",
+      "query_too_short": "Voer minimaal 2 tekens in.",
+      "interval_too_low": "Het minimale interval is 30 seconden.",
+      "cannot_connect": "Kan geen verbinding maken met de De Lijn API.",
+      "cache_download_failed": "Downloaden van haltegegevens mislukt."
+    },
+    "abort": {
+      "already_configured": "De Lijn is al geconfigureerd.",
+      "cache_download_failed": "Downloaden van haltegegevens mislukt."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De Lijn — Instellingen",
+        "menu_options": {
+          "add_stop": "Halte toevoegen",
+          "remove_stop": "Halte verwijderen",
+          "change_api_key": "API-sleutel wijzigen",
+          "change_interval": "Verversingsinterval wijzigen",
+          "change_language": "Weergavetaal wijzigen",
+          "force_cache_refresh": "Haltegegevens vernieuwen"
+        }
+      },
+      "add_stop": {
+        "title": "Halte toevoegen",
+        "description": "Zoek op naam of haltenummer.",
+        "data": {
+          "stop_search": "Naam of haltenummer"
+        }
+      },
+      "select_stop": {
+        "title": "Halte selecteren",
+        "description": "Selecteer een halte, of kies **← Opnieuw zoeken** om uw zoekopdracht te verfijnen.\n\n{legend}",
+        "data": {
+          "stop_key": "Halte"
+        }
+      },
+      "confirm_stop": {
+        "title": "Halte bevestigen",
+        "description": "{warning}Deze halte toevoegen?",
+        "data": {
+          "action": "Actie"
+        }
+      },
+      "remove_stop": {
+        "title": "Halte verwijderen",
+        "description": "Selecteer de te verwijderen halte.",
+        "data": {
+          "stop_key": "Te verwijderen halte"
+        }
+      },
+      "change_api_key": {
+        "title": "API-sleutel wijzigen",
+        "data": {
+          "api_key": "Nieuwe API-sleutel"
+        }
+      },
+      "change_interval": {
+        "title": "Verversingsinterval wijzigen",
+        "data": {
+          "scan_interval": "Interval (seconden, min. 30)"
+        }
+      },
+      "change_language": {
+        "title": "Weergavetaal wijzigen",
+        "data": {
+          "language": "Taal voor bestemmingsnamen"
+        }
+      },
+      "force_cache_refresh": {
+        "title": "Haltegegevens vernieuwen",
+        "description": "Hiermee worden alle De Lijn haltegegevens opnieuw gedownload. Doorgaan?",
+        "data": {
+          "confirm": "Ja, nu vernieuwen"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Ongeldige API-sleutel of API niet bereikbaar.",
+      "no_stops_found": "Geen haltes gevonden voor uw zoekopdracht.",
+      "query_too_short": "Voer minimaal 2 tekens in.",
+      "interval_too_low": "Het minimale interval is 30 seconden."
+    }
+  }
+}

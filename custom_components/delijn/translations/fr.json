@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De Lijn — Configuration API",
+        "description": "Entrez votre clé API De Lijn Open Data.",
+        "data": {
+          "api_key": "Clé API",
+          "scan_interval": "Intervalle de rafraîchissement (secondes, min. 30)",
+          "language": "Langue d'affichage des destinations"
+        }
+      },
+      "add_stop": {
+        "title": "Rechercher un arrêt",
+        "description": "Recherchez par **nom** pour regrouper toutes les plateformes, ou par **numéro d'arrêt** (imprimé sur le panneau) pour une plateforme précise.",
+        "data": {
+          "stop_search": "Nom ou numéro d'arrêt"
+        }
+      },
+      "select_stop": {
+        "title": "Sélectionner un arrêt",
+        "description": "Sélectionnez un arrêt, ou choisissez **← Nouvelle recherche** pour affiner.\n\n{legend}",
+        "data": {
+          "stop_key": "Arrêt"
+        }
+      },
+      "confirm_stop": {
+        "title": "Confirmer l'arrêt",
+        "description": "{warning}Ajouter cet arrêt ?",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "confirm_stops": {
+        "title": "Arrêts configurés",
+        "description": "Les arrêts suivants seront surveillés :\n{stops}",
+        "data": {
+          "action": "Action"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Clé API invalide ou API inaccessible.",
+      "no_stops_found": "Aucun arrêt trouvé pour cette recherche.",
+      "query_too_short": "Veuillez saisir au moins 2 caractères.",
+      "interval_too_low": "L'intervalle minimum est de 30 secondes.",
+      "cannot_connect": "Impossible de contacter l'API De Lijn.",
+      "cache_download_failed": "Échec du téléchargement des données d'arrêts."
+    },
+    "abort": {
+      "already_configured": "De Lijn est déjà configuré.",
+      "cache_download_failed": "Échec du téléchargement des données d'arrêts."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De Lijn — Paramètres",
+        "menu_options": {
+          "add_stop": "Ajouter un arrêt",
+          "remove_stop": "Supprimer un arrêt",
+          "change_api_key": "Modifier la clé API",
+          "change_interval": "Modifier l'intervalle de rafraîchissement",
+          "change_language": "Modifier la langue d'affichage",
+          "force_cache_refresh": "Forcer la mise à jour des arrêts"
+        }
+      },
+      "add_stop": {
+        "title": "Ajouter un arrêt",
+        "description": "Recherchez par nom ou numéro d'arrêt.",
+        "data": {
+          "stop_search": "Nom ou numéro d'arrêt"
+        }
+      },
+      "select_stop": {
+        "title": "Sélectionner un arrêt",
+        "description": "Sélectionnez un arrêt, ou choisissez **← Nouvelle recherche** pour affiner.\n\n{legend}",
+        "data": {
+          "stop_key": "Arrêt"
+        }
+      },
+      "confirm_stop": {
+        "title": "Confirmer l'arrêt",
+        "description": "{warning}Ajouter cet arrêt ?",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "remove_stop": {
+        "title": "Supprimer un arrêt",
+        "description": "Sélectionnez l'arrêt à supprimer.",
+        "data": {
+          "stop_key": "Arrêt à supprimer"
+        }
+      },
+      "change_api_key": {
+        "title": "Modifier la clé API",
+        "data": {
+          "api_key": "Nouvelle clé API"
+        }
+      },
+      "change_interval": {
+        "title": "Modifier l'intervalle de rafraîchissement",
+        "data": {
+          "scan_interval": "Intervalle (secondes, min. 30)"
+        }
+      },
+      "change_language": {
+        "title": "Modifier la langue d'affichage",
+        "data": {
+          "language": "Langue pour les noms de destination"
+        }
+      },
+      "force_cache_refresh": {
+        "title": "Forcer la mise à jour des arrêts",
+        "description": "Ceci re-téléchargera toutes les données d'arrêts De Lijn. Continuer ?",
+        "data": {
+          "confirm": "Oui, mettre à jour maintenant"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Clé API invalide ou API inaccessible.",
+      "no_stops_found": "Aucun arrêt trouvé pour cette recherche.",
+      "query_too_short": "Veuillez saisir au moins 2 caractères.",
+      "interval_too_low": "L'intervalle minimum est de 30 secondes."
+    }
+  }
+}
