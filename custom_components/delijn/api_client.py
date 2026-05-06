@@ -162,7 +162,7 @@ class DeLijnApiClient:
                 if response.status == 404:
                     raise DeLijnApiError(f"Not found: {path}")
                 response.raise_for_status()
-                return await response.json(content_type=None)
+                return await response.json()
         except aiohttp.ClientResponseError as err:
             raise DeLijnApiError(f"HTTP {err.status}: {path}") from err
         except aiohttp.ClientError as err:
