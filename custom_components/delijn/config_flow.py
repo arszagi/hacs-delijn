@@ -6,6 +6,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -312,13 +313,25 @@ class DeLijnOptionsFlow(OptionsFlow):
         current_stops = self._config_entry.data.get(CONF_STOPS, [])
         if user_input is not None:
             key_to_remove = user_input["stop_key"]
+            stop_to_remove = next((s for s in current_stops if s["key"] == key_to_remove), None)
             remaining = [s for s in current_stops if s["key"] != key_to_remove]
 
-            # Remove entities from registry
-            registry = er.async_get(self.hass)
-            for entity_entry in er.async_entries_for_config_entry(registry, self._config_entry.entry_id):
+            # Remove entities from entity registry
+            entity_reg = er.async_get(self.hass)
+            for entity_entry in er.async_entries_for_config_entry(entity_reg, self._config_entry.entry_id):
                 if f"_{key_to_remove}_" in entity_entry.unique_id or entity_entry.unique_id.endswith(f"_{key_to_remove}"):
-                    registry.async_remove(entity_entry.entity_id)
+                    entity_reg.async_remove(entity_entry.entity_id)
+
+            # Remove device if no remaining stop shares the same stop name (= same device)
+            if stop_to_remove:
+                stop_name = stop_to_remove.get("name", "")
+                same_name_still_exists = any(s.get("name") == stop_name for s in remaining)
+                if not same_name_still_exists and stop_name:
+                    device_reg = dr.async_get(self.hass)
+                    device_id = _slug(stop_name)
+                    device = device_reg.async_get_device({(DOMAIN, device_id)})
+                    if device:
+                        device_reg.async_remove_device(device.id)
 
             return self._save({CONF_STOPS: remaining})
 
@@ -421,6 +434,19 @@ class DeLijnOptionsFlow(OptionsFlow):
 
 
 # ------------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------------
+
+import re as _re
+
+def _slug(text: str) -> str:
+    """Convert a stop name to a lowercase underscore-separated slug (same as sensor.py)."""
+    text = text.lower().strip()
+    text = _re.sub(r"[^a-z0-9]+", "_", text)
+    return text.strip("_")
+
+
+# ------------------------------------------------------------------
 # Shared warning builder
 # ------------------------------------------------------------------
 
@@ -442,8 +468,9 @@ async def _build_stop_warning(group: dict, cache: StopCache) -> str:
             )
         elif classificatie == CLASSIFICATIE_FLEX:
             warnings.append(
-                f"ℹ️ Stop {stop['haltenummer']} is a **on-demand stop** (FLEX/Belbus). "
-                f"Departures are by reservation only — real-time data may be unavailable."
+                f"ℹ️ Stop {stop['haltenummer']} is a **Flexbus stop** (on-demand). "
+                f"Departures require a reservation: call **015 40 88 88** or use the **De Lijn Flex** app. "
+                f"Real-time data will not be available in Home Assistant."
             )
 
     return "\n\n".join(warnings) + ("\n\n" if warnings else "")

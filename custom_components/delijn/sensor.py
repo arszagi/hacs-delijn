@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_ALERTS,
     ATTR_BADGE_BACKGROUND,
+    LANG_FR,
     ATTR_BADGE_BORDER,
     ATTR_BADGE_TEXT,
     ATTR_BADGE_TEXT_BORDER,
@@ -133,7 +134,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             identifiers={(DOMAIN, _slug(stop_name))},
             name=stop_name,
             manufacturer="De Lijn",
-            model=_stop_type_label(self._stop.get("classificatie", "")),
+            model=_translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
         )
 
     @property
@@ -161,7 +162,7 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
         attrs: dict = {
             ATTR_STOP_NAME: self._stop["name"],
             ATTR_STOP_NUMBER: self._stop["haltenummer"],
-            ATTR_STOP_TYPE: self._stop.get("classificatie", ""),
+            ATTR_STOP_TYPE: _translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
             ATTR_LINE: self._line,
             ATTR_DIRECTION: self._direction,
             ATTR_LAST_UPDATED: datetime.now(timezone.utc).isoformat(),
@@ -234,7 +235,7 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             identifiers={(DOMAIN, _slug(stop_name))},
             name=stop_name,
             manufacturer="De Lijn",
-            model=_stop_type_label(self._stop.get("classificatie", "")),
+            model=_translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
         )
 
     @property
@@ -249,7 +250,7 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             return {ATTR_ALERTS: [], ATTR_STOP_TYPE: self._stop.get("classificatie", "")}
         alerts = self.coordinator.data.get(self._stop["key"], {}).get("alerts", [])
         return {
-            ATTR_STOP_TYPE: self._stop.get("classificatie", ""),
+            ATTR_STOP_TYPE: _translate_stop_type(self._stop.get("classificatie", ""), self.coordinator.language),
             ATTR_ALERTS: [
                 {
                     "type": a["type"],
@@ -267,6 +268,28 @@ class DeLijnAlertSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 # ------------------------------------------------------------------
 # Utilities
 # ------------------------------------------------------------------
+
+_STOP_TYPE_LABELS = {
+    LANG_FR: {
+        "REGULIER": "Régulier",
+        "TIJDELIJK": "Temporaire",
+        "FLEX": "Flexbus (à la demande)",
+        "COMBI": "Régulier + Flexbus",
+    },
+    "nl": {
+        "REGULIER": "Regulier",
+        "TIJDELIJK": "Tijdelijk",
+        "FLEX": "Flexbus",
+        "COMBI": "Regulier + Flexbus",
+    },
+}
+
+
+def _translate_stop_type(classificatie: str, language: str) -> str:
+    """Return a translated label for a stop classification."""
+    lang = LANG_FR if language == LANG_FR else "nl"
+    return _STOP_TYPE_LABELS[lang].get(classificatie, classificatie)
+
 
 def _slug(text: str) -> str:
     text = text.lower().strip()
@@ -294,11 +317,3 @@ def _format_time(iso_str: str | None) -> str | None:
     return dt.astimezone().strftime("%H:%M")
 
 
-def _stop_type_label(classificatie: str) -> str:
-    labels = {
-        "REGULIER": "Bus Stop",
-        "TIJDELIJK": "Temporary Stop",
-        "FLEX": "On-demand Stop",
-        "COMBI": "Combined Stop",
-    }
-    return labels.get(classificatie, "Bus Stop")

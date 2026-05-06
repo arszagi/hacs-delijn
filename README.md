@@ -80,15 +80,18 @@ You can search either by **name** or by **stop number** — the behaviour differ
 
 > Stop numbers are printed on the physical stop signs and on the De Lijn website.
 
-### Stop type warnings
+### Stop types
 
-During installation, the integration warns you when a stop has a special classification:
+De Lijn classifies each stop with one of four types:
 
-| Type | Meaning |
-|---|---|
-| `REGULIER` | Standard stop — no warning |
-| `TIJDELIJK` ⚠️ | Temporary stop — may be subject to changes or removal |
-| `FLEX` ℹ️ | On-demand stop (Belbus) — departures by reservation only |
+| Type | NL | FR | Meaning |
+|---|---|---|---|
+| `REGULIER` | Regulier | Régulier | Standard stop with fixed schedules |
+| `TIJDELIJK` ⚠️ | Tijdelijk | Temporaire | Temporary stop (e.g. due to roadworks) — may be removed when works end |
+| `FLEX` ℹ️ | Flexbus | Flexbus (à la demande) | On-demand stop — reservation required via **015 40 88 88** or the **De Lijn Flex** app. No real-time data available. |
+| `COMBI` | Regulier + Flexbus | Régulier + Flexbus | Mixed stop — served by both regular buses and a Flexbus |
+
+A warning is shown during installation for `TIJDELIJK` and `FLEX` stops. The stop type is also visible as an attribute on every sensor.
 
 ### Options (post-installation)
 
@@ -103,7 +106,7 @@ Click **Configure** on the integration card to:
 
 ## Entities
 
-For each configured stop, the integration creates a **device** grouping all related sensors. The device model reflects the stop type (`Bus Stop`, `Temporary Stop`, `On-demand Stop`).
+For each configured stop, the integration creates a **device** grouping all related sensors. The device model reflects the stop type in the configured language.
 
 ### Departure sensors
 
@@ -127,7 +130,7 @@ One sensor per bus/tram line and direction at the stop.
 | `badge_border` | Badge border color hex |
 | `badge_text_border` | Badge text outline color hex |
 | `stop_number` | Stop number (e.g. `354661`) |
-| `stop_type` | Stop classification (`REGULIER`, `TIJDELIJK`, `FLEX`) |
+| `stop_type` | Stop type in the configured language (Regulier, Tijdelijk, Flexbus, Regulier + Flexbus) |
 
 **Example entity ID:** `sensor.delijn_line_r70_sint_pieters_leeuw_e_ghijsstraat_to_brussel_zuid`
 
