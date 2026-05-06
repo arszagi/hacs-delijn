@@ -122,7 +122,7 @@ One sensor per bus/tram line and direction at the stop.
 | `scheduled` | Scheduled departure time (HH:MM) |
 | `realtime` | Real-time departure time (HH:MM) when available |
 | `delay_minutes` | Delay in minutes (negative = early) |
-| `prediction` | `REALTIME`, `GEENREALTIME`, `GESCHRAPT` or `VERSTREKEN` |
+| `prediction` | `REALTIME` — live data · `GEENREALTIME` — scheduled timetable (no live data) · `GESCHRAPT` — cancelled · `VERSTREKEN` — passed |
 | `vehicle_id` | Vehicle number |
 | `next_departures` | List of upcoming departures (scheduled, realtime, delay, cancelled) |
 | `badge_background` | Badge background color hex (e.g. `#BBDD00`) |
@@ -131,6 +131,8 @@ One sensor per bus/tram line and direction at the stop.
 | `badge_text_border` | Badge text outline color hex |
 | `stop_number` | Stop number (e.g. `354661`) |
 | `stop_type` | Stop type in the configured language (Regulier, Tijdelijk, Flexbus, Regulier + Flexbus) |
+
+**Timetable fallback** — when real-time data is unavailable (service outage, night hours), the sensor automatically falls back to the scheduled timetable. Times are still shown and the state still indicates minutes until the next departure. The `prediction` attribute will be `GEENREALTIME` to indicate the data is scheduled, not live. `realtime` and `delay_minutes` will be empty.
 
 **Example entity ID:** `sensor.delijn_line_r70_sint_pieters_leeuw_e_ghijsstraat_to_brussel_zuid`
 
