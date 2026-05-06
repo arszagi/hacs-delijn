@@ -149,14 +149,17 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
         """Build warning message and ask for confirmation."""
         self._pending_stop = group
         warning = await _build_stop_warning(group, self._stop_cache, self._language)
-        return await self.async_step_confirm_stop(warning=warning)
+        return await self.async_step_confirm_stop(
+            display_name=group["display_name"], warning=warning
+        )
 
-    async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
+    async def async_step_confirm_stop(
+        self, user_input: dict | None = None, display_name: str = "", warning: str = ""
+    ):
         if user_input is not None:
             action = user_input.get("action")
             if action == "cancel":
                 return await self.async_step_add_stop()
-            # Add all stop keys from this group
             for key in self._pending_stop["stop_keys"]:
                 stop_info = self._stop_cache.get_stop(key)
                 if stop_info and not any(s["key"] == key for s in self._selected_stops):
@@ -171,7 +174,10 @@ class DeLijnConfigFlow(ConfigFlow, domain=DOMAIN):
                     "cancel": "Search again",
                 })
             }),
-            description_placeholders={"warning": warning},
+            description_placeholders={
+                "display_name": display_name or self._pending_stop.get("display_name", ""),
+                "warning": warning,
+            },
         )
 
     # ------------------------------------------------------------------
@@ -288,9 +294,13 @@ class DeLijnOptionsFlow(OptionsFlow):
         cache = await self._get_cache()
         lang = self._config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
         warning = await _build_stop_warning(group, cache, lang)
-        return await self.async_step_confirm_stop(warning=warning)
+        return await self.async_step_confirm_stop(
+            display_name=group["display_name"], warning=warning
+        )
 
-    async def async_step_confirm_stop(self, user_input: dict | None = None, warning: str = ""):
+    async def async_step_confirm_stop(
+        self, user_input: dict | None = None, display_name: str = "", warning: str = ""
+    ):
         if user_input is not None:
             if user_input.get("action") == "cancel":
                 return await self.async_step_add_stop()
@@ -311,7 +321,10 @@ class DeLijnOptionsFlow(OptionsFlow):
                     "cancel": "Search again",
                 })
             }),
-            description_placeholders={"warning": warning},
+            description_placeholders={
+                "display_name": display_name or self._pending_stop.get("display_name", ""),
+                "warning": warning,
+            },
         )
 
     # Remove stop

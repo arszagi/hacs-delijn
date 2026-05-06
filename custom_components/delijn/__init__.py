@@ -18,6 +18,16 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entries to current format."""
+    if CONF_LANGUAGE not in entry.data:
+        _LOGGER.info("Migrating config entry: adding default language '%s'", DEFAULT_LANGUAGE)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_LANGUAGE: DEFAULT_LANGUAGE}
+        )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up De Lijn from a config entry."""
     api_key = entry.data[CONF_API_KEY]

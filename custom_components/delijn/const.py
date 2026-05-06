@@ -1,7 +1,7 @@
 """Constants for the De Lijn integration."""
 
 DOMAIN = "delijn"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # V1 Core API
 API_BASE_URL = "https://api.delijn.be/DLKernOpenData/api/v1"

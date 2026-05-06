@@ -26,7 +26,7 @@
       },
       "confirm_stop": {
         "title": "Confirm stop",
-        "description": "{warning}Add this stop?",
+        "description": "**{display_name}**\n\n{warning}",
         "data": {
           "action": "Action"
         }
@@ -80,7 +80,7 @@
       },
       "confirm_stop": {
         "title": "Confirm stop",
-        "description": "{warning}Add this stop?",
+        "description": "**{display_name}**\n\n{warning}",
         "data": {
           "action": "Action"
         }
