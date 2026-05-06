@@ -115,6 +115,8 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
         self._line = line
         self._direction = direction
         self._destination = destination
+        # Last known attributes — preserved when no buses are running
+        self._cached_attrs: dict = {}
 
         stop_key = stop["key"]
         dir_label = direction.lower() if direction else "unknown"
@@ -139,26 +141,29 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._next_departure() is not None
+        # Only mark unavailable when the coordinator itself fails,
+        # not when no buses are running — attributes must remain visible at night
+        return self.coordinator.last_update_success
 
     @property
     def native_value(self) -> int | None:
         dep = self._next_departure()
         if dep is None:
-            return None
+            return None  # No service — state empty but attributes still exposed
         effective_time = dep.get("realtime") or dep.get("scheduled")
         if not effective_time:
             return None
         dt = _parse_dt(effective_time)
         if dt is None:
             return None
-        minutes = max(0, int((dt - datetime.now(timezone.utc)).total_seconds() / 60))
-        return minutes
+        return max(0, int((dt - datetime.now(timezone.utc)).total_seconds() / 60))
 
     @property
     def extra_state_attributes(self) -> dict:
         dep = self._next_departure()
         all_deps = self._all_departures()
+
+        # Static attributes — always present
         attrs: dict = {
             ATTR_STOP_NAME: self._stop["name"],
             ATTR_STOP_NUMBER: self._stop["haltenummer"],
@@ -169,29 +174,40 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
         }
 
         if dep:
-            attrs[ATTR_SCHEDULED] = _format_time(dep.get("scheduled"))
-            attrs[ATTR_REALTIME] = _format_time(dep.get("realtime"))
-            attrs[ATTR_DELAY_MINUTES] = dep.get("delay_minutes")
-            attrs[ATTR_DESTINATION] = dep.get("destination", "")
-            attrs[ATTR_DESTINATION_FR] = dep.get("destination_fr", "")
-            attrs[ATTR_VEHICLE_ID] = dep.get("vehicle_id", "")
-            attrs[ATTR_PREDICTION] = _translate_prediction(dep.get("prediction", ""), self.coordinator.language)
-            # Badge colors (all 4, for use in custom Lovelace cards)
+            # Build live departure attributes and update the persistent cache
+            live = {
+                ATTR_SCHEDULED:    _format_time(dep.get("scheduled")),
+                ATTR_REALTIME:     _format_time(dep.get("realtime")),
+                ATTR_DELAY_MINUTES: dep.get("delay_minutes"),
+                ATTR_DESTINATION:  dep.get("destination", ""),
+                ATTR_DESTINATION_FR: dep.get("destination_fr", ""),
+                ATTR_VEHICLE_ID:   dep.get("vehicle_id", ""),
+                ATTR_PREDICTION:   _translate_prediction(dep.get("prediction", ""), self.coordinator.language),
+                ATTR_NEXT_DEPARTURES: [
+                    {
+                        "scheduled":    _format_time(d.get("scheduled")),
+                        "realtime":     _format_time(d.get("realtime")),
+                        "delay_minutes": d.get("delay_minutes"),
+                        "destination":  d.get("destination", ""),
+                        "prediction":   _translate_prediction(d.get("prediction", ""), self.coordinator.language),
+                        "cancelled":    d.get("cancelled", False),
+                    }
+                    for d in all_deps[1:5]
+                ],
+            }
             for color_attr in (ATTR_BADGE_BACKGROUND, ATTR_BADGE_TEXT, ATTR_BADGE_BORDER, ATTR_BADGE_TEXT_BORDER):
                 if val := dep.get(color_attr):
-                    attrs[color_attr] = val
+                    live[color_attr] = val
 
-        attrs[ATTR_NEXT_DEPARTURES] = [
-            {
-                "scheduled": _format_time(d.get("scheduled")),
-                "realtime": _format_time(d.get("realtime")),
-                "delay_minutes": d.get("delay_minutes"),
-                "destination": d.get("destination", ""),
-                "prediction": _translate_prediction(d.get("prediction", ""), self.coordinator.language),
-                "cancelled": d.get("cancelled", False),
-            }
-            for d in all_deps[1:5]
-        ]
+            # Persist so attributes survive when no buses are running
+            self._cached_attrs = live
+            attrs.update(live)
+        else:
+            # No current departure — expose last known data (line, colors, destination)
+            # so Lovelace cards keep working at night
+            attrs.update(self._cached_attrs)
+            attrs[ATTR_NEXT_DEPARTURES] = []
+
         return attrs
 
     def _all_departures(self) -> list[dict]:
