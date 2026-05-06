@@ -76,6 +76,10 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         self.language = DEFAULT_LANGUAGE  # set after init from config entry
         # Cache: (entiteitnummer, lijnnummer) → public line number (e.g. "R70")
         self._public_line_cache: dict[tuple, str] = {}
+        # Cache: color_code → hex string (e.g. "LG" → "#BBDD00")
+        self._color_hex_cache: dict[str, str] = {}
+        # Cache: (entiteitnummer, lijnnummer) → {badge_background, badge_text, badge_border, badge_text_border}
+        self._line_color_cache: dict[tuple, dict] = {}
 
     async def _async_update_data(self) -> dict:
         """Fetch real-time data for all configured stops in parallel."""
@@ -157,6 +161,7 @@ class DeLijnCoordinator(DataUpdateCoordinator):
 
                 internal_num = str(doorkomst.get("lijnnummer") or "")
                 public_num = await self._resolve_public_line(entiteitnummer, internal_num)
+                colors = await self._resolve_line_colors(entiteitnummer, internal_num)
 
                 dest_nl = (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip()
                 dest_fr = (doorkomst.get("bestemmingKortFrans") or "").strip()
@@ -175,11 +180,54 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                     "vehicle_id": doorkomst.get("vrtnum") or "",
                     "prediction": statuses[0] if statuses else "",
                     "cancelled": cancelled,
+                    **colors,
                 })
 
         # Sort by effective departure time
         departures.sort(key=lambda d: d.get("realtime") or d.get("scheduled") or "")
         return departures[:MAX_DEPARTURES]
+
+    async def _resolve_line_colors(self, entiteitnummer: str, lijnnummer: str) -> dict:
+        """Return the 4 badge colors for a line, fetched once and cached.
+
+        Keys: badge_background, badge_text, badge_border, badge_text_border.
+        """
+        if not lijnnummer:
+            return {}
+        cache_key = (entiteitnummer, lijnnummer)
+        if cache_key in self._line_color_cache:
+            return self._line_color_cache[cache_key]
+
+        raw = await self._api_client.fetch_line_colors(entiteitnummer, lijnnummer)
+        if not raw:
+            self._line_color_cache[cache_key] = {}
+            return {}
+
+        mapping = {
+            "badge_background": raw.get("achtergrond", {}).get("code"),
+            "badge_text": raw.get("voorgrond", {}).get("code"),
+            "badge_border": raw.get("achtergrondRand", {}).get("code"),
+            "badge_text_border": raw.get("voorgrondRand", {}).get("code"),
+        }
+
+        # Resolve each code to hex
+        colors = {}
+        for attr, code in mapping.items():
+            if code:
+                colors[attr] = await self._resolve_color_code(code)
+
+        self._line_color_cache[cache_key] = colors
+        _LOGGER.debug("Line %s colors: %s", lijnnummer, colors)
+        return colors
+
+    async def _resolve_color_code(self, code: str) -> str | None:
+        """Return hex value for a De Lijn color code, cached."""
+        if code in self._color_hex_cache:
+            return self._color_hex_cache[code]
+        hex_val = await self._api_client.fetch_color(code)
+        if hex_val:
+            self._color_hex_cache[code] = hex_val
+        return hex_val
 
     async def _resolve_public_line(self, entiteitnummer: str, lijnnummer: str) -> str | None:
         """Return the public line number (e.g. 'R70') for an internal lijnnummer.

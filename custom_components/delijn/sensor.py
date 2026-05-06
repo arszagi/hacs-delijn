@@ -13,6 +13,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_ALERTS,
+    ATTR_BADGE_BACKGROUND,
+    ATTR_BADGE_BORDER,
+    ATTR_BADGE_TEXT,
+    ATTR_BADGE_TEXT_BORDER,
     ATTR_DELAY_MINUTES,
     ATTR_DESTINATION,
     ATTR_DESTINATION_FR,
@@ -171,6 +175,10 @@ class DeLijnDepartureSensor(CoordinatorEntity[DeLijnCoordinator], SensorEntity):
             attrs[ATTR_DESTINATION_FR] = dep.get("destination_fr", "")
             attrs[ATTR_VEHICLE_ID] = dep.get("vehicle_id", "")
             attrs[ATTR_PREDICTION] = dep.get("prediction", "")
+            # Badge colors (all 4, for use in custom Lovelace cards)
+            for color_attr in (ATTR_BADGE_BACKGROUND, ATTR_BADGE_TEXT, ATTR_BADGE_BORDER, ATTR_BADGE_TEXT_BORDER):
+                if val := dep.get(color_attr):
+                    attrs[color_attr] = val
 
         attrs[ATTR_NEXT_DEPARTURES] = [
             {

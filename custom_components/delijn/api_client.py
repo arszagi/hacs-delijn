@@ -78,6 +78,22 @@ class DeLijnApiClient:
             f"/lijnen/{entiteitnummer}/{lijnnummer}/lijnrichtingen/{richting}/omleidingen"
         )
 
+    async def fetch_line_colors(self, entiteitnummer: str, lijnnummer: str) -> dict | None:
+        """Return the 4 color codes for a line badge (voorgrond, achtergrond, etc.)."""
+        try:
+            return await self._get(f"/lijnen/{entiteitnummer}/{lijnnummer}/lijnkleuren")
+        except DeLijnApiError:
+            return None
+
+    async def fetch_color(self, code: str) -> str | None:
+        """Return the hex color value for a De Lijn color code (e.g. 'LG' → '#BBDD00')."""
+        try:
+            data = await self._get(f"/kleuren/{code}")
+            hex_val = data.get("hex", "")
+            return f"#{hex_val}" if hex_val else None
+        except DeLijnApiError:
+            return None
+
     async def fetch_public_line_number(
         self, entiteitnummer: str, lijnnummer: str
     ) -> str | None:

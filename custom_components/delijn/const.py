@@ -42,6 +42,10 @@ CACHE_STOPS_FILE = "stops_v1.json.gz"
 
 # Entity attributes
 ATTR_LINE = "line"
+ATTR_BADGE_BACKGROUND = "badge_background"
+ATTR_BADGE_TEXT = "badge_text"
+ATTR_BADGE_BORDER = "badge_border"
+ATTR_BADGE_TEXT_BORDER = "badge_text_border"
 ATTR_DIRECTION = "direction"
 ATTR_DESTINATION = "destination"
 ATTR_DESTINATION_FR = "destination_fr"
