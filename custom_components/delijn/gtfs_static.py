@@ -48,12 +48,20 @@ class GtfsStaticManager:
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Load data from cache, or download if cache is missing."""
+        """Load data from cache, or download if cache is missing or outdated."""
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         if self._cache_is_complete():
             _LOGGER.debug("Loading GTFS static data from local cache")
-            await self._hass.async_add_executor_job(self._load_from_cache)
+            try:
+                await self._hass.async_add_executor_job(self._load_from_cache)
+                # Verify cache has the stop code field (added in v0.0.3)
+                if not self._cache_has_stop_codes():
+                    _LOGGER.info("GTFS cache is outdated (missing stop codes) — re-downloading")
+                    await self._download_and_parse()
+            except Exception as err:
+                _LOGGER.warning("GTFS cache load failed (%s) — re-downloading", err)
+                await self._download_and_parse()
         else:
             _LOGGER.info("GTFS static cache not found — downloading from API")
             await self._download_and_parse()
@@ -212,6 +220,13 @@ class GtfsStaticManager:
             and (self._cache_dir / CACHE_ROUTES_FILE).exists()
             and (self._cache_dir / CACHE_TRIPS_FILE).exists()
         )
+
+    def _cache_has_stop_codes(self) -> bool:
+        """Return True if the in-memory stops dict contains the 'code' field."""
+        if not self._stops:
+            return False
+        sample = next(iter(self._stops.values()))
+        return "code" in sample
 
     def _load_from_cache(self) -> None:
         """Load in-memory dicts from cached JSON files (blocking)."""
