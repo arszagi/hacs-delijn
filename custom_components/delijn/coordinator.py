@@ -310,6 +310,10 @@ class DeLijnCoordinator(DataUpdateCoordinator):
     async def _resolve_public_line(self, entiteitnummer: str, lijnnummer: str) -> str | None:
         """Return the public line number (e.g. 'R70') for an internal lijnnummer.
 
+        The same internal number means different lines across entities (e.g. 500 = '50'
+        in entity 2 but 'KT' in entity 5). When the stop's entity returns a pure-letter
+        code (no digits), we try other entities and prefer a numeric result.
+
         Results are cached in memory so each unique line is only fetched once.
         """
         if not lijnnummer:
@@ -319,9 +323,24 @@ class DeLijnCoordinator(DataUpdateCoordinator):
             return self._public_line_cache[cache_key]
 
         public = await self._api_client.fetch_public_line_number(entiteitnummer, lijnnummer)
+
+        # If the result is pure alphabetic (e.g. "KT"), the line may belong to a
+        # different entity — try the others and prefer a result that contains digits
+        if public and public.isalpha():
+            for other_entity in ["1", "2", "3", "4", "5"]:
+                if other_entity == entiteitnummer:
+                    continue
+                other_public = await self._api_client.fetch_public_line_number(other_entity, lijnnummer)
+                if other_public and not other_public.isalpha():
+                    _LOGGER.debug(
+                        "Line %s: entity %s gave '%s' (letters only), using entity %s → '%s'",
+                        lijnnummer, entiteitnummer, public, other_entity, other_public,
+                    )
+                    public = other_public
+                    break
+
         if public:
             self._public_line_cache[cache_key] = public
-            _LOGGER.debug("Line %s (entity %s) → public: %s", lijnnummer, entiteitnummer, public)
         return public
 
     # ------------------------------------------------------------------
