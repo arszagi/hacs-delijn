@@ -189,8 +189,10 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                     delay_minutes = round(delta.total_seconds() / 60, 1)
 
                 internal_num = str(doorkomst.get("lijnnummer") or "")
-                public_num = await self._resolve_public_line(entiteitnummer, internal_num)
-                colors = await self._resolve_line_colors(entiteitnummer, internal_num)
+                # Use the line's own entity, not the stop's entity — a line may cross regions
+                line_entity = str(doorkomst.get("entiteitnummer") or entiteitnummer)
+                public_num = await self._resolve_public_line(line_entity, internal_num)
+                colors = await self._resolve_line_colors(line_entity, internal_num)
 
                 dest_nl = (doorkomst.get("bestemmingKort") or doorkomst.get("bestemming") or "").strip()
                 dest_fr = (doorkomst.get("bestemmingKortFrans") or "").strip()
@@ -198,7 +200,8 @@ class DeLijnCoordinator(DataUpdateCoordinator):
                 display_dest = (dest_fr if self.language == LANG_FR and dest_fr else dest_nl)
 
                 departures.append({
-                    "_internal_line": internal_num,  # kept for batch color lookup
+                    "_internal_line": internal_num,   # kept for batch color lookup
+                    "_line_entity": line_entity,       # kept for batch color lookup
                     "line": public_num or internal_num,
                     "direction": doorkomst.get("richting") or "",
                     "destination": display_dest,
@@ -227,7 +230,8 @@ class DeLijnCoordinator(DataUpdateCoordinator):
         for stop in self.stops:
             for dep in result.get(stop["key"], {}).get("departures", []):
                 internal = dep.get("_internal_line", "")
-                entity = stop["entiteitnummer"]
+                # Use the line's own entity stored in the departure dict
+                entity = dep.get("_line_entity", stop["entiteitnummer"])
                 if internal and (entity, internal) not in self._line_color_cache:
                     new_keys.append((entity, internal))
 
@@ -323,22 +327,6 @@ class DeLijnCoordinator(DataUpdateCoordinator):
             return self._public_line_cache[cache_key]
 
         public = await self._api_client.fetch_public_line_number(entiteitnummer, lijnnummer)
-
-        # If the result is pure alphabetic (e.g. "KT"), the line may belong to a
-        # different entity — try the others and prefer a result that contains digits
-        if public and public.isalpha():
-            for other_entity in ["1", "2", "3", "4", "5"]:
-                if other_entity == entiteitnummer:
-                    continue
-                other_public = await self._api_client.fetch_public_line_number(other_entity, lijnnummer)
-                if other_public and not other_public.isalpha():
-                    _LOGGER.debug(
-                        "Line %s: entity %s gave '%s' (letters only), using entity %s → '%s'",
-                        lijnnummer, entiteitnummer, public, other_entity, other_public,
-                    )
-                    public = other_public
-                    break
-
         if public:
             self._public_line_cache[cache_key] = public
         return public
